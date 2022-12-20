@@ -1865,9 +1865,16 @@ private fun ObjCExportCodeGenerator.createDirectAdapters(
     return requiredAdapters.distinctBy { it.base.selector }.map { createMethodAdapter(it) }
 }
 
+private val cache = mutableMapOf<IrSimpleFunction, Set<IrSimpleFunction>>()
+fun IrSimpleFunction.overriddenFunctions(): Set<IrSimpleFunction> = cache.getOrPut(this) {
+    val res = mutableSetOf(this)
+    this.overriddenSymbols.forEach { res.addAll(it.owner.overriddenFunctions()) }
+    res
+}
+
 private fun ObjCExportCodeGenerator.findImplementation(irClass: IrClass, method: IrSimpleFunction, context: Context): IrSimpleFunction? {
     val override = irClass.simpleFunctions().singleOrNull {
-        method in it.getLowered().allOverriddenFunctions
+        method in it.getLowered().overriddenFunctions()
     } ?: error("no implementation for ${method.render()}\nin ${irClass.fqNameWhenAvailable}")
     return OverriddenFunctionInfo(override, method).getImplementation(context)
 }
