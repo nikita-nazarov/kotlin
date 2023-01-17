@@ -10,7 +10,7 @@ import llvm.*
 /**
  * Provides utilities to create static data.
  */
-internal open class StaticData(val module: LLVMModuleRef, private val llvm: Llvm) {
+internal open class StaticData(var module: LLVMModuleRef, private val llvm: Llvm) {
 
     /**
      * Represents the LLVM global variable.

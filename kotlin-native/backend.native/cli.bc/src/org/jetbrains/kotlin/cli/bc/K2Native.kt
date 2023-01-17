@@ -369,6 +369,8 @@ class K2Native : CLICompiler<K2NativeCompilerArguments>() {
                 arguments.testDumpOutputPath?.let { put(TEST_DUMP_OUTPUT_PATH, it) }
                 put(PARTIAL_LINKAGE, arguments.partialLinkage)
                 put(OMIT_FRAMEWORK_BINARY, arguments.omitFrameworkBinary)
+                put(PRODUCE_FRAMEWORK_BITCODE, arguments.produceFrameworkBitcode)
+                put(READ_FRAMEWORK_BITCODE, arguments.readFrameworkBitcode)
                 putIfNotNull(FORCE_COMPILER_DRIVER, arguments.forceCompilerDriver)
             }
         }

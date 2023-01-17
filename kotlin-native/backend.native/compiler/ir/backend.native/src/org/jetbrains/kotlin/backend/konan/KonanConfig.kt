@@ -455,6 +455,22 @@ class KonanConfig(val project: Project, val configuration: CompilerConfiguration
             }
         }
     }
+    internal val produceFrameworkBitcode: Boolean by lazy {
+        configuration.getBoolean(KonanConfigKeys.PRODUCE_FRAMEWORK_BITCODE).also {
+            if (it && produce != CompilerOutputKind.FRAMEWORK) {
+                configuration.report(CompilerMessageSeverity.STRONG_WARNING,
+                        "Trying to write framework bitcode when producing ${produce.name.lowercase()} is meaningless.")
+            }
+        }
+    }
+    internal val readFrameworkBitcode: Boolean by lazy {
+        configuration.getBoolean(KonanConfigKeys.READ_FRAMEWORK_BITCODE).also {
+            if (it && produce != CompilerOutputKind.FRAMEWORK) {
+                configuration.report(CompilerMessageSeverity.STRONG_WARNING,
+                        "Trying to read bitcode from file for framework compilation when producing ${produce.name.lowercase()} is meaningless.")
+            }
+        }
+    }
 }
 
 fun CompilerConfiguration.report(priority: CompilerMessageSeverity, message: String)

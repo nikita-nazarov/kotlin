@@ -448,8 +448,7 @@ private val backendCodegen = SameTypeNamedCompilerPhase(
                 bitcodePhase then
                 verifyBitcodePhase then
                 printBitcodePhase then
-                linkBitcodeDependenciesPhase then
-                bitcodePostprocessingPhase
+                linkBitcodeDependenciesPhase
 )
 
 internal val createGenerationStatePhase = namedUnitPhase(
@@ -478,7 +477,8 @@ private val phasesOverMainModule = SameTypeNamedCompilerPhase(
         lower = takeFromContext<Context, Unit, IrModuleFragment> { it.irModule!! } then
                 specialBackendChecksPhase then
                 backendCodegen then
-                unitSink(),
+                unitSink() then
+                bitcodePostprocessingPhase,
         prerequisite = setOf(psiToIrPhase)
 )
 

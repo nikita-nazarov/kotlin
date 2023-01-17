@@ -204,6 +204,14 @@ internal fun linkBitcodeDependencies(generationState: NativeGenerationState) {
 
 }
 
+internal fun readBitcodeFromFile(generationState: NativeGenerationState) {
+    val bitcodeFile = generationState.tempFiles.bitcodeDump
+    val module = parseBitcodeFile(generationState.llvmContext, bitcodeFile.absolutePath)
+    LLVMDisposeModule(generationState.llvm.module)
+    generationState.llvm.module = module
+    generationState.llvm.staticData = KotlinStaticData(generationState, generationState.llvm, module)
+}
+
 // TODO: Remove this function after dynamic driver is complete.
 internal fun produceOutput(generationState: NativeGenerationState) {
     val context = generationState.context

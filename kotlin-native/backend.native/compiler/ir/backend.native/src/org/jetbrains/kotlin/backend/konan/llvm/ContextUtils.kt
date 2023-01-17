@@ -295,7 +295,7 @@ internal class ConstFloat64(llvm: Llvm, val value: Double) : ConstValue {
 }
 
 @Suppress("FunctionName", "PropertyName", "PrivatePropertyName")
-internal class Llvm(private val generationState: NativeGenerationState, val module: LLVMModuleRef) : RuntimeAware {
+internal class Llvm(private val generationState: NativeGenerationState, var module: LLVMModuleRef) : RuntimeAware {
     private val context = generationState.context
     val llvmContext = generationState.llvmContext
 
@@ -466,7 +466,7 @@ internal class Llvm(private val generationState: NativeGenerationState, val modu
 
     val additionalProducedBitcodeFiles = mutableListOf<String>()
 
-    val staticData = KotlinStaticData(generationState, this, module)
+    var staticData = KotlinStaticData(generationState, this, module)
 
     private val target = context.config.target
 

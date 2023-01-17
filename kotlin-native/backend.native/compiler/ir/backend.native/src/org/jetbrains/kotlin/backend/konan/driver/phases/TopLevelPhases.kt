@@ -11,6 +11,7 @@ import org.jetbrains.kotlin.backend.konan.driver.PhaseEngine
 import org.jetbrains.kotlin.backend.konan.driver.runPhaseInParentContext
 import org.jetbrains.kotlin.backend.konan.llvm.linkBitcodeDependenciesPhase
 import org.jetbrains.kotlin.backend.konan.llvm.printBitcodePhase
+import org.jetbrains.kotlin.backend.konan.llvm.readBitcodePhase
 import org.jetbrains.kotlin.backend.konan.llvm.verifyBitcodePhase
 import org.jetbrains.kotlin.cli.jvm.compiler.KotlinCoreEnvironment
 import org.jetbrains.kotlin.ir.declarations.IrModuleFragment
@@ -53,6 +54,15 @@ internal fun <C : PhaseContext> PhaseEngine<C>.runBackend(backendContext: Contex
                 // TODO: We can run compile part in parallel if we get rid of context.generationState.
                 generationStateEngine.runLowerAndCompile(fragment)
             }
+        }
+    }
+}
+
+internal fun <C : PhaseContext> PhaseEngine<C>.runBitcodeBackend(backendContext: Context) {
+    useContext(backendContext) { backendEngine ->
+        val generationState = NativeGenerationState(context.config, backendContext, null)
+        backendEngine.useContext(generationState) { generationStateEngine ->
+            generationStateEngine.runBitcodeToBinary()
         }
     }
 }
@@ -113,16 +123,25 @@ internal fun PhaseEngine<NativeGenerationState>.runLowerAndCompile(module: IrMod
     if (context.config.produce == CompilerOutputKind.PROGRAM) {
         runPhaseInParentContext(entryPointPhase, module)
     }
-    runBackendCodegen(module)
+    if (context.config.readFrameworkBitcode) {
+        runPhaseInParentContext(readBitcodePhase)
+    } else {
+        runBackendCodegen(module)
+    }
+    runPhaseInParentContext(bitcodePostprocessingPhase)
+    runPhase(WriteBitcodeFilePhase)
     if (context.config.produce.isCache) {
         runPhaseInParentContext(saveAdditionalCacheInfoPhase)
     }
-    runPhase(WriteBitcodeFilePhase)
-    runPhaseInParentContext(objectFilesPhase)
-    runPhaseInParentContext(linkerPhase)
+    runBitcodeToBinary()
     if (context.config.produce.isCache) {
         runPhaseInParentContext(finalizeCachePhase)
     }
+}
+
+internal fun PhaseEngine<NativeGenerationState>.runBitcodeToBinary() {
+    runPhaseInParentContext(objectFilesPhase)
+    runPhaseInParentContext(linkerPhase)
 }
 
 internal fun PhaseEngine<NativeGenerationState>.runBackendCodegen(module: IrModuleFragment) {
@@ -132,5 +151,4 @@ internal fun PhaseEngine<NativeGenerationState>.runBackendCodegen(module: IrModu
     runPhaseInParentContext(verifyBitcodePhase, module)
     runPhaseInParentContext(printBitcodePhase, module)
     runPhaseInParentContext(linkBitcodeDependenciesPhase, module)
-    runPhaseInParentContext(bitcodePostprocessingPhase, module)
 }

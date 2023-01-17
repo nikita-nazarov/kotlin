@@ -272,42 +272,48 @@ internal val linkBitcodeDependenciesPhase = makeKonanModuleOpPhase(
         op = { context, _ -> linkBitcodeDependencies(context.generationState) }
 )
 
-internal val checkExternalCallsPhase = makeKonanModuleOpPhase(
+internal val readBitcodePhase = konanUnitPhase(
+        name = "ReadBitcodeFromFile",
+        description = "Read bitcode from file",
+        op = { readBitcodeFromFile(this.generationState) }
+)
+
+internal val checkExternalCallsPhase = konanUnitPhase(
         name = "CheckExternalCalls",
         description = "Check external calls",
-        op = { context, _ -> checkLlvmModuleExternalCalls(context.generationState) }
+        op = { checkLlvmModuleExternalCalls(this.generationState) }
 )
 
-internal val rewriteExternalCallsCheckerGlobals = makeKonanModuleOpPhase(
+internal val rewriteExternalCallsCheckerGlobals = konanUnitPhase(
         name = "RewriteExternalCallsCheckerGlobals",
         description = "Rewrite globals for external calls checker after optimizer run",
-        op = { context, _ -> addFunctionsListSymbolForChecker(context.generationState) }
+        op = { addFunctionsListSymbolForChecker(this.generationState) }
 )
 
 
 
-internal val bitcodeOptimizationPhase = makeKonanModuleOpPhase(
+internal val bitcodeOptimizationPhase = konanUnitPhase(
         name = "BitcodeOptimization",
         description = "Optimize bitcode",
-        op = { context, _ ->
-            val generationState = context.generationState
-            val config = createLTOFinalPipelineConfig(context.generationState)
-            LlvmOptimizationPipeline(config, context.generationState.llvm.module, generationState).use {
+        op = {
+            val generationState = this.generationState
+            val config = createLTOFinalPipelineConfig(this.generationState)
+            LlvmOptimizationPipeline(config, this.generationState.llvm.module, generationState).use {
                 it.run()
             }
         }
 )
 
-internal val coveragePhase = makeKonanModuleOpPhase(
+internal val coveragePhase = konanUnitPhase(
         name = "Coverage",
         description = "Produce coverage information",
-        op = { context, _ -> runCoveragePass(context.generationState) }
+        op = { runCoveragePass(this.generationState) }
 )
 
-internal val optimizeTLSDataLoadsPhase = makeKonanModuleOpPhase(
+internal val optimizeTLSDataLoadsPhase = konanUnitPhase(
         name = "OptimizeTLSDataLoads",
         description = "Optimize multiple loads of thread data",
-        op = { context, _ -> removeMultipleThreadDataLoads(context.generationState) }
+        op = { removeMultipleThreadDataLoads(this.generationState) }
 )
 
 internal val produceOutputPhase = namedUnitPhase(
@@ -320,13 +326,13 @@ internal val produceOutputPhase = namedUnitPhase(
         }
 )
 
-internal val removeRedundantSafepointsPhase = makeKonanModuleOpPhase(
+internal val removeRedundantSafepointsPhase = konanUnitPhase(
         name = "RemoveRedundantSafepoints",
         description = "Remove function prologue safepoints inlined to another function",
-        op = { context, _ ->
+        op = {
             RemoveRedundantSafepointsPass().runOnModule(
-                    module = context.generationState.llvm.module,
-                    isSafepointInliningAllowed = context.shouldInlineSafepoints()
+                    module = this.generationState.llvm.module,
+                    isSafepointInliningAllowed = this.shouldInlineSafepoints()
             )
         }
 )
