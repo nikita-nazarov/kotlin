@@ -11,6 +11,9 @@
 #include <llvm/Transforms/ObjCARC.h>
 #include <llvm/Transforms/Utils/Cloning.h>
 #include <llvm/Transforms/Instrumentation/ThreadSanitizer.h>
+#include <llvm/Transforms/IPO/PassManagerBuilder.h>
+#include <llvm-c/ExternC.h>
+#include <llvm-c/Types.h>
 
 using namespace llvm;
 
@@ -57,4 +60,14 @@ int LLVMInlineCall(LLVMValueRef call) {
 
 void LLVMAddThreadSanitizerPass(LLVMPassManagerRef PM) {
   unwrap(PM)->add(createThreadSanitizerLegacyPassPass());
+}
+
+void LLVMPassManagerBuilderPopulateThinLTOPassManager(LLVMPassManagerBuilderRef PMB,
+                                                      LLVMPassManagerRef PM,
+                                                      LLVMBool Internalize,
+                                                      LLVMBool RunInliner) 
+{
+  PassManagerBuilder *Builder = unwrap(PMB);
+  legacy::PassManagerBase *LPM = unwrap(PM);
+  Builder->populateThinLTOPassManager(*LPM);
 }

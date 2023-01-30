@@ -44,18 +44,27 @@ internal sealed class RuntimeLinkageStrategy {
             if (runtimeNativeLibraries.isEmpty()) {
                 return emptyList()
             }
-            val runtimeModule = LLVMModuleCreateWithNameInContext("runtime", generationState.llvmContext)!!
-            runtimeNativeLibraries.forEach {
-                val failed = llvmLinkModules2(generationState, runtimeModule, it)
-                if (failed != 0) {
-                    throw Error("Failed to link ${it.getName()}")
+
+            val config = createLTOPipelineConfigForRuntime(generationState)
+            for (library in runtimeNativeLibraries) {
+                LlvmOptimizationPipeline(config, library, generationState).use {
+                    it.run()
                 }
             }
-            val config = createLTOPipelineConfigForRuntime(generationState)
-            LlvmOptimizationPipeline(config, runtimeModule, generationState).use {
-                it.run()
-            }
-            return listOf(runtimeModule)
+
+            return runtimeNativeLibraries
+//            val runtimeModule = LLVMModuleCreateWithNameInContext("runtime", generationState.llvmContext)!!
+//            runtimeNativeLibraries.forEach {
+//                val failed = llvmLinkModules2(generationState, runtimeModule, it)
+//                if (failed != 0) {
+//                    throw Error("Failed to link ${it.getName()}")
+//                }
+//            }
+//            val config = createLTOPipelineConfigForRuntime(generationState)
+//            LlvmOptimizationPipeline(config, runtimeModule, generationState).use {
+//                it.run()
+//            }
+//            return listOf(runtimeModule)
         }
     }
 

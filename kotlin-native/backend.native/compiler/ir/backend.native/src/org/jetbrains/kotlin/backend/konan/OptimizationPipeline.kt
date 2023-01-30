@@ -239,7 +239,9 @@ class LlvmOptimizationPipeline(
         }
 
         // Pipeline that is similar to `llvm-lto`.
-        LLVMPassManagerBuilderPopulateLTOPassManager(passBuilder, modulePasses, Internalize = 0, RunInliner = 1)
+//        LLVMPassManagerBuilderPopulateLTOPassManager(passBuilder, modulePasses, Internalize = 0, RunInliner = 1)
+        println("Compiling with thin LTO")
+        LLVMPassManagerBuilderPopulateThinLTOPassManager(passBuilder, modulePasses, Internalize = 0, RunInliner = 1)
 
         if (config.objCPasses) {
             // Lower ObjC ARC intrinsics (e.g. `@llvm.objc.clang.arc.use(...)`).
