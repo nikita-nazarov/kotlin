@@ -11,6 +11,8 @@
 #include <llvm/Transforms/ObjCARC.h>
 #include <llvm/Transforms/Utils/Cloning.h>
 #include <llvm/Transforms/Instrumentation/ThreadSanitizer.h>
+#include <llvm/Transforms/Scalar.h>
+#include <NameAnonFunctionPass.h>
 
 using namespace llvm;
 
@@ -57,4 +59,8 @@ int LLVMInlineCall(LLVMValueRef call) {
 
 void LLVMAddThreadSanitizerPass(LLVMPassManagerRef PM) {
   unwrap(PM)->add(createThreadSanitizerLegacyPassPass());
+}
+
+void LLVMAddNameAnonFunctionPass(LLVMPassManagerRef PM) {
+  unwrap(PM)->add(createNameAnonFunctionPass());
 }

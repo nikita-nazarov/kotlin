@@ -391,7 +391,8 @@ private fun processCLib(flavor: KotlinPlatform, cinteropArguments: CInteropArgum
             val linkerOpts =
                     def.config.linkerOpts.toTypedArray() +
                             tool.getDefaultCompilerOptsForLanguage(library.language) +
-                            additionalLinkerOpts
+                            additionalLinkerOpts +
+                            arrayOf("-lc++", "-fno-rtti")
             val outLib = File(nativeLibsDir, System.mapLibraryName(libName))
             val linkerCmd = arrayOf(linker,
                     outOFile.absolutePath, "-shared", "-o", outLib.absolutePath,

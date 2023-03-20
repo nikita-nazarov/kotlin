@@ -2914,6 +2914,7 @@ internal class LocationInfo(val scope: DIScopeOpaqueRef,
 
 internal fun NativeGenerationState.generateRuntimeConstantsModule() : LLVMModuleRef {
     val llvmModule = LLVMModuleCreateWithNameInContext("constants", llvmContext)!!
+    LLVMSetTarget(llvmModule, runtime.target)
     LLVMSetDataLayout(llvmModule, runtime.dataLayout)
     val static = StaticData(llvmModule, llvm)
 

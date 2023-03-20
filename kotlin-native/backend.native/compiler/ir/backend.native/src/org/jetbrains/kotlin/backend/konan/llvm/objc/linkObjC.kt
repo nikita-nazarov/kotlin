@@ -15,6 +15,10 @@ import org.jetbrains.kotlin.backend.konan.objcexport.NSNumberKind
 import org.jetbrains.kotlin.backend.konan.objcexport.ObjCExportNamer
 
 internal fun patchObjCRuntimeModule(generationState: NativeGenerationState): LLVMModuleRef? {
+    if (!generationState.isObjCExportInitialized()) {
+        return null
+    }
+
     val config = generationState.config
     if (!(config.isFinalBinary && config.target.family.isAppleFamily)) return null
 

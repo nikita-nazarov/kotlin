@@ -9,7 +9,9 @@ import org.jetbrains.kotlin.backend.konan.*
 import org.jetbrains.kotlin.backend.konan.driver.PhaseContext
 import org.jetbrains.kotlin.backend.konan.driver.PhaseEngine
 import org.jetbrains.kotlin.backend.konan.driver.runPhaseInParentContext
+import org.jetbrains.kotlin.backend.konan.llvm.*
 import org.jetbrains.kotlin.backend.konan.llvm.linkBitcodeDependenciesPhase
+import org.jetbrains.kotlin.backend.konan.llvm.nameAnonymousFunctionsPhase
 import org.jetbrains.kotlin.backend.konan.llvm.printBitcodePhase
 import org.jetbrains.kotlin.backend.konan.llvm.readBitcodePhase
 import org.jetbrains.kotlin.backend.konan.llvm.verifyBitcodePhase
@@ -123,19 +125,27 @@ internal fun PhaseEngine<NativeGenerationState>.runLowerAndCompile(module: IrMod
     if (context.config.produce == CompilerOutputKind.PROGRAM) {
         runPhaseInParentContext(entryPointPhase, module)
     }
+
     if (context.config.readFrameworkBitcode) {
         runPhaseInParentContext(readBitcodePhase)
+        runPhaseInParentContext(bitcodePostprocessingPhase)
+//        runPhaseInParentContext(linkBitcodeDependenciesPhase, module)
     } else {
         runBackendCodegen(module)
+//        if (context.config.produce == CompilerOutputKind.FRAMEWORK && context.config.produceStaticFramework) {
+//            embedAppleLinkerOptionsToBitcode(context.llvm, context.config)
+//        }
+        runPhaseInParentContext(nameAnonymousFunctionsPhase)
     }
-    runPhaseInParentContext(bitcodePostprocessingPhase)
     runPhase(WriteBitcodeFilePhase)
-    if (context.config.produce.isCache) {
-        runPhaseInParentContext(saveAdditionalCacheInfoPhase)
-    }
-    runBitcodeToBinary()
-    if (context.config.produce.isCache) {
-        runPhaseInParentContext(finalizeCachePhase)
+    if (!context.config.produceFrameworkBitcode) {
+        if (context.config.produce.isCache) {
+            runPhaseInParentContext(saveAdditionalCacheInfoPhase)
+        }
+        runBitcodeToBinary()
+        if (context.config.produce.isCache) {
+            runPhaseInParentContext(finalizeCachePhase)
+        }
     }
 }
 
@@ -150,5 +160,8 @@ internal fun PhaseEngine<NativeGenerationState>.runBackendCodegen(module: IrModu
     runPhaseInParentContext(bitcodePhase, module)
     runPhaseInParentContext(verifyBitcodePhase, module)
     runPhaseInParentContext(printBitcodePhase, module)
-    runPhaseInParentContext(linkBitcodeDependenciesPhase, module)
+
+    if (!context.config.produceFrameworkBitcode) {
+        runPhaseInParentContext(linkBitcodeDependenciesPhase, module)
+    }
 }

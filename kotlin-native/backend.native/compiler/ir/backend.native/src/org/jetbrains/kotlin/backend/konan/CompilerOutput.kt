@@ -15,6 +15,7 @@ import org.jetbrains.kotlin.backend.common.serialization.KlibIrVersion
 import org.jetbrains.kotlin.backend.konan.cexport.produceCAdapterBitcode
 import org.jetbrains.kotlin.backend.konan.llvm.*
 import org.jetbrains.kotlin.backend.konan.llvm.objc.patchObjCRuntimeModule
+import org.jetbrains.kotlin.backend.konan.objcexport.ObjCExport
 import org.jetbrains.kotlin.backend.konan.objcexport.createObjCFramework
 import org.jetbrains.kotlin.ir.declarations.IrModuleFragment
 import org.jetbrains.kotlin.konan.CURRENT
@@ -29,6 +30,7 @@ import org.jetbrains.kotlin.library.KotlinLibraryVersioning
 import org.jetbrains.kotlin.library.metadata.KlibMetadataVersion
 import org.jetbrains.kotlin.library.uniqueName
 import org.jetbrains.kotlin.utils.addToStdlib.ifNotEmpty
+import java.io.File
 
 /**
  * Supposed to be true for a single LLVM module within final binary.
@@ -127,10 +129,10 @@ private fun collectLlvmModules(generationState: NativeGenerationState, generated
             }
 
     val nativeLibraries = config.nativeLibraries + config.launcherNativeLibraries
-            .takeIf { config.produce == CompilerOutputKind.PROGRAM }.orEmpty()
+//            .takeIf { config.produce == CompilerOutputKind.PROGRAM }.orEmpty()
     val additionalBitcodeFilesToLink = generationState.llvm.additionalProducedBitcodeFiles
     val exceptionsSupportNativeLibrary = listOf(config.exceptionsSupportNativeLibrary)
-            .takeIf { config.produce == CompilerOutputKind.DYNAMIC_CACHE }.orEmpty()
+//            .takeIf { config.produce == CompilerOutputKind.DYNAMIC_CACHE }.orEmpty()
     val additionalBitcodeFiles = nativeLibraries +
             generatedBitcodeFiles +
             additionalBitcodeFilesToLink +
@@ -150,7 +152,7 @@ private fun collectLlvmModules(generationState: NativeGenerationState, generated
 
     val runtimeModules = parseBitcodeFiles(
             (runtimeNativeLibraries + bitcodePartOfStdlib)
-                    .takeIf { generationState.shouldLinkRuntimeNativeLibraries }.orEmpty()
+//                    .takeIf { generationState.shouldLinkRuntimeNativeLibraries }.orEmpty()
     )
     val additionalModules = parseBitcodeFiles(additionalBitcodeFiles)
     return LlvmModules(
@@ -184,6 +186,11 @@ internal fun insertAliasToEntryPoint(generationState: NativeGenerationState) {
     LLVMAddAlias(module, LLVMTypeOf(entryPoint)!!, entryPoint, "main")
 }
 
+internal fun collectLLVMModules(generationState: NativeGenerationState): List<LLVMModuleRef> {
+    val (runtimeModules, additionalModules) = collectLlvmModules(generationState, emptyList())
+    return runtimeModules + additionalModules
+}
+
 internal fun linkBitcodeDependencies(generationState: NativeGenerationState) {
     val config = generationState.config
     val tempFiles = generationState.tempFiles
@@ -201,15 +208,36 @@ internal fun linkBitcodeDependencies(generationState: NativeGenerationState) {
         embedAppleLinkerOptionsToBitcode(generationState.llvm, config)
     }
     linkAllDependencies(generationState, generatedBitcodeFiles)
-
 }
 
 internal fun readBitcodeFromFile(generationState: NativeGenerationState) {
-    val bitcodeFile = generationState.tempFiles.bitcodeDump
-    val module = parseBitcodeFile(generationState.llvmContext, bitcodeFile.absolutePath)
+    val tmpDir = generationState.config.configuration.get(KonanConfigKeys.TEMPORARY_FILES_DIR)!!
+    val bitcodeFiles = File(tmpDir).walk().filter { it.isFile }
+    val modules = mutableListOf<LLVMModuleRef>()
+    var parentModule: LLVMModuleRef? = null
+    for (file in bitcodeFiles) {
+        val module = parseBitcodeFile(generationState.llvmContext, file.absolutePath)
+        if (file.name.contains("bitcodeDump")) {
+            parentModule = module
+        } else {
+            modules += module
+        }
+    }
+
+    for (module in modules) {
+        val failed = llvmLinkModules2(generationState, parentModule!!, module)
+        if (failed != 0) {
+            throw Error("Failed to link $module")
+        }
+    }
     LLVMDisposeModule(generationState.llvm.module)
-    generationState.llvm.module = module
-    generationState.llvm.staticData = KotlinStaticData(generationState, generationState.llvm, module)
+    generationState.llvm.module = parentModule!!
+    generationState.llvm.staticData = KotlinStaticData(generationState, generationState.llvm, parentModule)
+
+//    val config = generationState.config
+//    if (config.produce == CompilerOutputKind.FRAMEWORK && config.produceStaticFramework) {
+//        embedAppleLinkerOptionsToBitcode(generationState.llvm, config)
+//    }
 }
 
 // TODO: Remove this function after dynamic driver is complete.
@@ -304,7 +332,7 @@ private fun parseAndLinkBitcodeFile(generationState: NativeGenerationState, llvm
     }
 }
 
-private fun embedAppleLinkerOptionsToBitcode(llvm: Llvm, config: KonanConfig) {
+internal fun embedAppleLinkerOptionsToBitcode(llvm: Llvm, config: KonanConfig) {
     fun findEmbeddableOptions(options: List<String>): List<List<String>> {
         val result = mutableListOf<List<String>>()
         val iterator = options.iterator()

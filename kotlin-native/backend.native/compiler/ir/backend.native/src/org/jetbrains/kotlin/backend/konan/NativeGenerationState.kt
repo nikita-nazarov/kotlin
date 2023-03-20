@@ -18,6 +18,7 @@ import org.jetbrains.kotlin.ir.declarations.IrFile
 import org.jetbrains.kotlin.ir.declarations.IrFunction
 import org.jetbrains.kotlin.konan.TempFiles
 import org.jetbrains.kotlin.konan.file.File
+import kotlin.random.Random
 
 internal class InlineFunctionOriginInfo(val irFunction: IrFunction, val irFile: IrFile, val startOffset: Int, val endOffset: Int)
 
@@ -46,6 +47,8 @@ internal class NativeGenerationState(
         val context: Context,
         val cacheDeserializationStrategy: CacheDeserializationStrategy?
 ) : BasicPhaseContext(config) {
+    val random = Random(1)
+
     private val outputPath = config.cacheSupport.tryGetImplicitOutput(cacheDeserializationStrategy) ?: config.outputPath
     val outputFiles = OutputFiles(outputPath, config.target, config.produce)
     val tempFiles = run {
@@ -104,6 +107,9 @@ internal class NativeGenerationState(
     val coverage by lazy { CoverageManager(this) }
 
     lateinit var objCExport: ObjCExport
+
+    fun isObjCExportInitialized(): Boolean =
+            this::objCExport.isInitialized
 
     fun hasDebugInfo() = debugInfoDelegate.isInitialized()
 

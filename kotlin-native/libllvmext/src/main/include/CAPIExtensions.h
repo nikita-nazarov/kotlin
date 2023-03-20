@@ -27,6 +27,8 @@ int LLVMInlineCall(LLVMValueRef call);
 
 void LLVMAddThreadSanitizerPass(LLVMPassManagerRef PM);
 
+void LLVMAddNameAnonFunctionPass(LLVMPassManagerRef PM);
+
 # ifdef __cplusplus
 }
 # endif

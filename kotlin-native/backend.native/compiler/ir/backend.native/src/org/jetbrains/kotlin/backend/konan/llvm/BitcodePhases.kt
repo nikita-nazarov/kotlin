@@ -275,13 +275,25 @@ internal val linkBitcodeDependenciesPhase = makeKonanModuleOpPhase(
 internal val readBitcodePhase = konanUnitPhase(
         name = "ReadBitcodeFromFile",
         description = "Read bitcode from file",
-        op = { readBitcodeFromFile(this.generationState) }
+        op = {
+            readBitcodeFromFile(generationState)
+        }
 )
 
 internal val checkExternalCallsPhase = konanUnitPhase(
         name = "CheckExternalCalls",
         description = "Check external calls",
         op = { checkLlvmModuleExternalCalls(this.generationState) }
+)
+
+internal val nameAnonymousFunctionsPhase = konanUnitPhase(
+        name = "NameAnonymousFunctions",
+        description = "Name anonymous functions",
+        op = {
+            val passManager = LLVMCreatePassManager()
+            LLVMAddNameAnonFunctionPass(passManager)
+            LLVMRunPassManager(passManager, this.generationState.llvm.module)
+        }
 )
 
 internal val rewriteExternalCallsCheckerGlobals = konanUnitPhase(
