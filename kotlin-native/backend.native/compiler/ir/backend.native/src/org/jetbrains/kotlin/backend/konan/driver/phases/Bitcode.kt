@@ -5,9 +5,7 @@
 
 package org.jetbrains.kotlin.backend.konan.driver.phases
 
-import llvm.LLVMDumpModule
-import llvm.LLVMModuleRef
-import llvm.LLVMWriteBitcodeToFile
+import llvm.*
 import org.jetbrains.kotlin.backend.common.LoggingContext
 import org.jetbrains.kotlin.backend.konan.*
 import org.jetbrains.kotlin.backend.konan.NativeGenerationState
@@ -38,9 +36,9 @@ internal data class WriteBitcodeFileInput(
 internal val WriteBitcodeFilePhase = createSimpleNamedCompilerPhase<PhaseContext, WriteBitcodeFileInput>(
         "WriteBitcodeFile",
         "Write bitcode file",
-) { context, (llvmModule, outputFile) ->
+) { _, (llvmModule, outputFile) ->
     // Insert `_main` after pipeline, so we won't worry about optimizations corrupting entry point.
-    insertAliasToEntryPoint(context, llvmModule)
+    //insertAliasToEntryPoint(context, llvmModule)
     LLVMWriteBitcodeToFile(llvmModule, outputFile.canonicalPath)
 }
 
@@ -50,6 +48,15 @@ internal val CheckExternalCallsPhase = createSimpleNamedCompilerPhase<NativeGene
         postactions = getDefaultLlvmModuleActions(),
 ) { context, _ ->
     checkLlvmModuleExternalCalls(context)
+}
+
+internal val NameAnonymousFunctionsPhase = createSimpleNamedCompilerPhase<NativeGenerationState, Unit>(
+        name = "NameAnonymousFunctions",
+        description = "Name anonymous functions"
+) { context, _ ->
+            val passManager = LLVMCreatePassManager()
+            LLVMAddNameAnonFunctionPass(passManager)
+            LLVMRunPassManager(passManager, context.llvm.module)
 }
 
 internal val RewriteExternalCallsCheckerGlobals = createSimpleNamedCompilerPhase<NativeGenerationState, Unit>(
@@ -164,7 +171,7 @@ internal fun <T : BitcodePostProcessingContext> PhaseEngine<T>.runBitcodePostPro
         val module = this@runBitcodePostProcessing.context.llvmModule
         it.runPhase(MandatoryBitcodeLLVMPostprocessingPhase, module)
         it.runPhase(ModuleBitcodeOptimizationPhase, module)
-        it.runPhase(LTOBitcodeOptimizationPhase, module)
+//        it.runPhase(LTOBitcodeOptimizationPhase, module)
         when (context.config.sanitizer) {
             SanitizerKind.THREAD -> it.runPhase(ThreadSanitizerPhase, module)
             SanitizerKind.ADDRESS -> context.reportCompilationError("Address sanitizer is not supported yet")

@@ -12,6 +12,8 @@
 #include <llvm/Transforms/Utils/Cloning.h>
 #include <llvm/Transforms/Instrumentation/ThreadSanitizer.h>
 #include <llvm/Support/Timer.h>
+#include <llvm/Transforms/Scalar.h>
+#include <NameAnonFunctionPass.h>
 
 using namespace llvm;
 
@@ -70,4 +72,8 @@ void LLVMPrintAllTimersToStdOut() {
 
 void LLVMClearAllTimers() {
     llvm::TimerGroup::clearAll();
+}
+
+void LLVMAddNameAnonFunctionPass(LLVMPassManagerRef PM) {
+  unwrap(PM)->add(createNameAnonFunctionPass());
 }

@@ -31,7 +31,8 @@ native {
     val cxxflags = mutableListOf(
         "--std=c++17",
         "-I${llvmDir}/include",
-        "-Isrc/main/include"
+        "-Isrc/main/include",
+        "-fno-rtti",
     )
     when (org.jetbrains.kotlin.konan.target.HostManager.host.family) {
         LINUX -> {

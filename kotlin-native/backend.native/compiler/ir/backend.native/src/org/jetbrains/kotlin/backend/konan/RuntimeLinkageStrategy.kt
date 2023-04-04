@@ -72,10 +72,11 @@ internal sealed class RuntimeLinkageStrategy {
         internal fun pick(generationState: NativeGenerationState, runtimeLlvmModules: List<LLVMModuleRef>): RuntimeLinkageStrategy {
             val config = generationState.config
             val binaryOption = config.configuration.get(BinaryOptions.linkRuntime)
+            println(binaryOption)
             return when {
-                binaryOption == RuntimeLinkageStrategyBinaryOption.Raw -> Raw(runtimeLlvmModules)
-                binaryOption == RuntimeLinkageStrategyBinaryOption.Optimize -> LinkAndOptimize(generationState, runtimeLlvmModules)
-                config.debug -> LinkAndOptimize(generationState, runtimeLlvmModules)
+//                binaryOption == RuntimeLinkageStrategyBinaryOption.Raw -> Raw(runtimeLlvmModules)
+//                binaryOption == RuntimeLinkageStrategyBinaryOption.Optimize -> LinkAndOptimize(generationState, runtimeLlvmModules)
+//                config.debug -> LinkAndOptimize(generationState, runtimeLlvmModules)
                 else -> Raw(runtimeLlvmModules)
             }
 

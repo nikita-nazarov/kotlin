@@ -5,12 +5,14 @@
 
 package org.jetbrains.kotlin.backend.konan.driver.phases
 
+import llvm.*
 import org.jetbrains.kotlin.backend.konan.*
 import org.jetbrains.kotlin.backend.konan.driver.PhaseContext
 import org.jetbrains.kotlin.backend.konan.driver.PhaseEngine
 import org.jetbrains.kotlin.backend.konan.driver.utilities.CExportFiles
 import org.jetbrains.kotlin.backend.konan.driver.utilities.createTempFiles
 import org.jetbrains.kotlin.backend.konan.ir.konanLibrary
+import org.jetbrains.kotlin.backend.konan.llvm.getName
 import org.jetbrains.kotlin.cli.jvm.compiler.KotlinCoreEnvironment
 import org.jetbrains.kotlin.config.CommonConfigurationKeys
 import org.jetbrains.kotlin.ir.declarations.IrClass
@@ -29,6 +31,7 @@ import java.util.concurrent.Callable
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.random.Random
 
 internal fun PhaseEngine<PhaseContext>.runFrontend(config: KonanConfig, environment: KotlinCoreEnvironment): FrontendPhaseOutput.Full? {
     val frontendOutput = useContext(FrontendContextImpl(config)) { it.runPhase(FrontendPhase, environment) }
@@ -110,8 +113,8 @@ internal fun <C : PhaseContext> PhaseEngine<C>.runBackend(backendContext: Contex
                     if (!depsFilePath.isNullOrEmpty()) {
                         depsFilePath.File().writeLines(DependenciesTrackingResult.serialize(dependenciesTrackingResult))
                     }
-                    val moduleCompilationOutput = ModuleCompilationOutput(bitcodeFile, dependenciesTrackingResult)
-                    compileAndLink(moduleCompilationOutput, outputFiles.mainFileName, outputFiles, tempFiles, isCoverageEnabled = false)
+                    //val moduleCompilationOutput = ModuleCompilationOutput(bitcodeFile, dependenciesTrackingResult)
+                    //compileAndLink(moduleCompilationOutput, outputFiles.mainFileName, outputFiles, tempFiles, isCoverageEnabled = false)
                 }
             } finally {
                 tempFiles.dispose()
@@ -261,9 +264,28 @@ internal fun PhaseEngine<NativeGenerationState>.compileModule(module: IrModuleFr
     if (context.config.produce.isCache) {
         runPhase(SaveAdditionalCacheInfoPhase)
     }
-    runPhase(WriteBitcodeFilePhase, WriteBitcodeFileInput(context.llvm.module, bitcodeFile))
+//    runPhase(WriteBitcodeFilePhase, WriteBitcodeFileInput(context.llvm.module, bitcodeFile))
+    runPhase(NameAnonymousFunctionsPhase)
+    writeBitcodeFiles(context, context.llvm.module, bitcodeFile)
 }
 
+private fun writeBitcodeFiles(context: NativeGenerationState, llvmModule: LLVMModuleRef, outputFile: java.io.File) {
+    LLVMWriteBitcodeToFile(llvmModule, outputFile.canonicalPath)
+    val tmpDir = outputFile.canonicalPath.substringBeforeLast("/")
+    val entryPointName = context.config.entryPointName
+    var entryPoint: LLVMValueRef? = null
+    val random = Random.Default
+    for (module in collectLLVMModules(context)) {
+        if (entryPoint == null) {
+            LLVMGetNamedFunction(module, entryPointName)?.let {
+                entryPoint = it
+                LLVMAddAlias(module, LLVMTypeOf(entryPoint)!!, entryPoint, "main")
+            }
+        }
+        val name = module.getName().substringAfterLast("/").substringBefore(".")
+        LLVMWriteBitcodeToFile(module, "$tmpDir/$name${random.nextInt()}.bc")
+    }
+}
 
 internal fun <C : PhaseContext> PhaseEngine<C>.compileAndLink(
         moduleCompilationOutput: ModuleCompilationOutput,
@@ -320,7 +342,7 @@ internal fun PhaseEngine<NativeGenerationState>.lowerModuleWithDependencies(modu
 
 internal fun PhaseEngine<NativeGenerationState>.runBackendCodegen(module: IrModuleFragment, cExportFiles: CExportFiles?) {
     runCodegen(module)
-    val generatedBitcodeFiles = if (context.config.produce.isNativeLibrary) {
+    if (context.config.produce.isNativeLibrary) {
         require(cExportFiles != null)
         val input = CExportGenerateApiInput(
                 context.context.cAdapterExportedElements!!,
@@ -345,7 +367,7 @@ internal fun PhaseEngine<NativeGenerationState>.runBackendCodegen(module: IrModu
     if (context.shouldPrintBitCode()) {
         runPhase(PrintBitcodePhase, llvmModule)
     }
-    runPhase(LinkBitcodeDependenciesPhase, generatedBitcodeFiles)
+    // runPhase(LinkBitcodeDependenciesPhase, generatedBitcodeFiles)
 }
 
 /**

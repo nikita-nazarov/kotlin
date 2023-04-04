@@ -79,4 +79,20 @@ extern "C" void Kotlin_ObjCExport_resumeContinuation(KRef continuation, KRef res
   }
 }
 
+#else
+
+#import "Memory.h"
+#import "ObjCExport.h"
+#import "ObjCExportErrors.h"
+
+extern "C" void Kotlin_ObjCExport_runCompletionSuccess(KRef completionHolder, KRef result) {
+}
+
+extern "C" void Kotlin_ObjCExport_runCompletionFailure(
+  KRef completionHolder,
+  KRef exception,
+  const TypeInfo** exceptionTypes
+) {
+}
+
 #endif

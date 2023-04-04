@@ -36,6 +36,8 @@ void LLVMPrintAllTimersToStdOut();
 /// Clear all LLVM timers. Allows avoiding automatic printing on shutdown
 void LLVMClearAllTimers();
 
+void LLVMAddNameAnonFunctionPass(LLVMPassManagerRef PM);
+
 # ifdef __cplusplus
 }
 # endif

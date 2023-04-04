@@ -88,10 +88,10 @@ private fun collectLlvmModules(generationState: NativeGenerationState, generated
             }
 
     val nativeLibraries = config.nativeLibraries + config.launcherNativeLibraries
-            .takeIf { config.produce == CompilerOutputKind.PROGRAM }.orEmpty()
+//            .takeIf { config.produce == CompilerOutputKind.PROGRAM }.orEmpty()
     val additionalBitcodeFilesToLink = generationState.llvm.additionalProducedBitcodeFiles
     val exceptionsSupportNativeLibrary = listOf(config.exceptionsSupportNativeLibrary)
-            .takeIf { config.produce == CompilerOutputKind.DYNAMIC_CACHE }.orEmpty()
+//            .takeIf { config.produce == CompilerOutputKind.DYNAMIC_CACHE }.orEmpty()
     val additionalBitcodeFiles = nativeLibraries +
             generatedBitcodeFiles +
             additionalBitcodeFilesToLink +
@@ -111,13 +111,18 @@ private fun collectLlvmModules(generationState: NativeGenerationState, generated
 
     val runtimeModules = parseBitcodeFiles(
             (runtimeNativeLibraries + bitcodePartOfStdlib)
-                    .takeIf { generationState.shouldLinkRuntimeNativeLibraries }.orEmpty()
+//                    .takeIf { generationState.shouldLinkRuntimeNativeLibraries }.orEmpty()
     )
     val additionalModules = parseBitcodeFiles(additionalBitcodeFiles)
     return LlvmModules(
             runtimeModules.ifNotEmpty { this + generationState.generateRuntimeConstantsModule() } ?: emptyList(),
             additionalModules + listOfNotNull(patchObjCRuntimeModule(generationState))
     )
+}
+
+internal fun collectLLVMModules(generationState: NativeGenerationState): List<LLVMModuleRef> {
+    val (runtimeModules, additionalModules) = collectLlvmModules(generationState, emptyList())
+    return runtimeModules + additionalModules
 }
 
 private fun linkAllDependencies(generationState: NativeGenerationState, generatedBitcodeFiles: List<String>) {
