@@ -87,17 +87,6 @@ public class InlineAdapter extends InstructionAdapter {
     }
 
     @Override
-    public void visitLineNumber(int line, @NotNull Label start) {
-        if (GENERATE_SMAP) {
-            line = sourceMapper.mapLineNumber(line);
-        }
-        //skip not mapped lines
-        if (line >= 0) {
-            super.visitLineNumber(line, start);
-        }
-    }
-
-    @Override
     public void visitMaxs(int stack, int locals) {
         for (CatchBlock b : blocks) {
             super.visitTryCatchBlock(b.start, b.end, b.handler, b.type);

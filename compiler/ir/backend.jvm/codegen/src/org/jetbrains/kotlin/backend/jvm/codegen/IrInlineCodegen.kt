@@ -156,7 +156,23 @@ class IrInlineCodegen(
         expression: IrFunctionAccessExpression,
         isInsideIfCondition: Boolean,
     ) {
-        performInline(isInsideIfCondition, function.isInlineOnly())
+        val result = performInline(isInsideIfCondition, function.isInlineOnly())
+        val functionToScopes = state.globalInlineContext.inlineFunctionToScopes
+        val originSignature = codegen.signature.toString()
+        val originScopes = functionToScopes.getOrPut(originSignature) { mutableListOf() }
+        val inlinedSignature = jvmSignature.toString()
+        val scopes = functionToScopes[inlinedSignature]
+        val old2NewLineNumbers = hashMapOf<Int, Int>()
+        for ((i, j) in result.lineNumbersBeforeRemapping.zip(result.lineNumbersAfterRemapping)) {
+            old2NewLineNumbers[i] = j
+        }
+
+        for (scope in scopes.orEmpty()) {
+            originScopes.add(InlineScope(scope.functionId, scope.lineNumbers.mapNotNull { old2NewLineNumbers[it] }))
+        }
+
+        val surroundingInlinedScope = InlineScope(inlinedSignature, result.lineNumbersAfterRemapping)
+        originScopes.add(surroundingInlinedScope)
     }
 
     override fun genCycleStub(text: String, codegen: ExpressionCodegen) {

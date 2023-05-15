@@ -50,7 +50,7 @@ class MethodInliner(
     private val overrideLineNumber: Boolean = false,
     private val shouldPreprocessApiVersionCalls: Boolean = false,
     private val defaultMaskStart: Int = -1,
-    private val defaultMaskEnd: Int = -1
+    private val defaultMaskEnd: Int = -1,
 ) {
     private val languageVersionSettings = inliningContext.state.languageVersionSettings
     private val invokeCalls = ArrayList<InvokeCall>()
@@ -67,7 +67,7 @@ class MethodInliner(
         adapter: MethodVisitor,
         remapper: LocalVarRemapper,
         remapReturn: Boolean,
-        returnLabels: Map<String, Label?>
+        returnLabels: Map<String, Label?>,
     ): InlineResult {
         return doInline(adapter, remapper, remapReturn, returnLabels, 0)
     }
@@ -87,7 +87,7 @@ class MethodInliner(
         remapper: LocalVarRemapper,
         remapReturn: Boolean,
         returnLabels: Map<String, Label?>,
-        finallyDeepShift: Int
+        finallyDeepShift: Int,
     ): InlineResult {
         //analyze body
         var transformedNode = markPlacesForInlineAndRemoveInlinable(node, returnLabels, finallyDeepShift)
@@ -135,6 +135,7 @@ class MethodInliner(
         }
         //flush transformed node to output
         resultNode.accept(SkipMaxAndEndVisitor(adapter))
+
         return result
     }
 
@@ -163,7 +164,19 @@ class MethodInliner(
                 if (!overrideLineNumber) {
                     currentLineNumber = line
                 }
-                super.visitLineNumber(line, start)
+
+                var newLine = line
+                if (GENERATE_SMAP) {
+                    newLine = sourceMapper.mapLineNumber(line);
+                }
+
+                //skip not mapped lines
+                if (newLine >= 0) {
+                    super.visitLineNumber(newLine, start);
+                }
+
+                result.lineNumbersBeforeRemapping.add(line)
+                result.lineNumbersAfterRemapping.add(newLine)
             }
 
             private fun handleAnonymousObjectRegeneration() {
@@ -478,8 +491,10 @@ class MethodInliner(
             }
 
             override fun visitLocalVariable(
-                name: String, desc: String, signature: String?, start: Label, end: Label, index: Int
+                name: String, desc: String, signature: String?, start: Label, end: Label, index: Int,
             ) {
+                val functionToScopes = inliningContext.state.globalInlineContext.inlineFunctionToScopes
+                println(functionToScopes)
                 if (isInliningLambda || GENERATE_DEBUG_INFO) {
                     val isInlineFunctionMarker = name.startsWith(JvmAbi.LOCAL_VARIABLE_NAME_PREFIX_INLINE_FUNCTION)
                     val varSuffix = when {
@@ -502,7 +517,7 @@ class MethodInliner(
     }
 
     private fun markPlacesForInlineAndRemoveInlinable(
-        node: MethodNode, returnLabels: Map<String, Label?>, finallyDeepShift: Int
+        node: MethodNode, returnLabels: Map<String, Label?>, finallyDeepShift: Int,
     ): MethodNode {
         val processingNode = prepareNode(node, finallyDeepShift)
 
@@ -786,7 +801,7 @@ class MethodInliner(
 
     private fun replaceContinuationsWithFakeOnes(
         continuations: Collection<AbstractInsnNode>,
-        node: MethodNode
+        node: MethodNode,
     ) {
         for (toReplace in continuations) {
             insertNodeBefore(createFakeContinuationMethodNodeForInline(), node, toReplace)
@@ -909,7 +924,7 @@ class MethodInliner(
         desc: String,
         lambdaMapping: Map<Int, FunctionalArgument>,
         needReification: Boolean,
-        capturesAnonymousObjectThatMustBeRegenerated: Boolean
+        capturesAnonymousObjectThatMustBeRegenerated: Boolean,
     ): AnonymousObjectTransformationInfo {
         // In objects inside non-default inline lambdas, all reified type parameters are free (not from the function
         // we're inlining into) so there's nothing to reify:
@@ -1024,7 +1039,7 @@ class MethodInliner(
         private class LocalReturn(
             private val returnInsn: AbstractInsnNode,
             private val insertBeforeInsn: AbstractInsnNode,
-            private val frame: Frame<FixStackValue>
+            private val frame: Frame<FixStackValue>,
         ) {
 
             fun transform(insnList: InsnList, returnVariableIndex: Int) {
@@ -1060,7 +1075,7 @@ class MethodInliner(
         fun addLocalReturnToTransform(
             returnInsn: AbstractInsnNode,
             insertBeforeInsn: AbstractInsnNode,
-            sourceValueFrame: Frame<FixStackValue>
+            sourceValueFrame: Frame<FixStackValue>,
         ) {
             assert(isReturnOpcode(returnInsn.opcode)) { "return instruction expected" }
             assert(returnOpcode < 0 || returnOpcode == returnInsn.opcode) { "Return op should be " + Printer.OPCODES[returnOpcode] + ", got " + Printer.OPCODES[returnInsn.opcode] }
@@ -1091,7 +1106,7 @@ class MethodInliner(
         @JvmField val beforeIns: AbstractInsnNode,
         @JvmField val returnType: Type,
         @JvmField val finallyIntervalEnd: LabelNode,
-        @JvmField val jumpTarget: Label?
+        @JvmField val jumpTarget: Label?,
     )
 
     companion object {
@@ -1165,7 +1180,7 @@ class MethodInliner(
         //process local and global returns (local substituted with goto end-label global kept unchanged)
         @JvmStatic
         fun processReturns(
-            node: MethodNode, returnLabels: Map<String, Label?>, endLabel: Label?
+            node: MethodNode, returnLabels: Map<String, Label?>, endLabel: Label?,
         ): List<PointForExternalFinallyBlocks> {
             val result = ArrayList<PointForExternalFinallyBlocks>()
             val instructions = node.instructions

@@ -47,7 +47,7 @@ abstract class InlineCodegen<out T : BaseExpressionCodegen>(
         }
     }
 
-    fun performInline(registerLineNumberAfterwards: Boolean, isInlineOnly: Boolean) {
+    fun performInline(registerLineNumberAfterwards: Boolean, isInlineOnly: Boolean): InlineResult {
         var nodeAndSmap: SMAPAndMethodNode? = null
         try {
             nodeAndSmap = compileInline()
@@ -56,6 +56,7 @@ abstract class InlineCodegen<out T : BaseExpressionCodegen>(
             codegen.propagateChildReifiedTypeParametersUsages(result.reifiedTypeParametersUsages)
             codegen.markLineNumberAfterInlineIfNeeded(registerLineNumberAfterwards)
             state.factory.removeClasses(result.calcClassesToRemove())
+            return result
         } catch (e: CompilationException) {
             throw e
         } catch (e: InlineException) {

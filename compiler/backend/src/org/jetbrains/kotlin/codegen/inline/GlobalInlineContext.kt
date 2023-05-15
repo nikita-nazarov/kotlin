@@ -12,6 +12,8 @@ import org.jetbrains.kotlin.diagnostics.Errors
 import org.jetbrains.kotlin.utils.threadLocal
 import java.util.*
 
+data class InlineScope(val functionId: String, val lineNumbers: List<Int>)
+
 class GlobalInlineContext(private val diagnostics: DiagnosticSink) {
     // Ordered set of declarations and inline calls being generated right now.
     // No call in it should point to a declaration that's before it in the stack.
@@ -19,6 +21,8 @@ class GlobalInlineContext(private val diagnostics: DiagnosticSink) {
     private val inlineDeclarationSet by threadLocal { mutableSetOf<CallableDescriptor>() }
 
     private val typesUsedInInlineFunctions by threadLocal { LinkedList<MutableSet<String>>() }
+
+    val inlineFunctionToScopes: HashMap<String, MutableList<InlineScope>> = hashMapOf()
 
     fun enterDeclaration(descriptor: CallableDescriptor) {
         assert(descriptor.original !in inlineDeclarationSet) { "entered inlining cycle on $descriptor" }

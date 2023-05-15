@@ -25,6 +25,8 @@ class InlineResult private constructor() {
     private val classesToRemove = HashSet<String>()
     private val changedTypes = HashMap<String, String>()
     val reifiedTypeParametersUsages = ReifiedTypeParametersUsages()
+    val lineNumbersBeforeRemapping = mutableListOf<Int>()
+    val lineNumbersAfterRemapping = mutableListOf<Int>()
 
     fun merge(child: InlineResult) {
         classesToRemove.addAll(child.calcClassesToRemove())
