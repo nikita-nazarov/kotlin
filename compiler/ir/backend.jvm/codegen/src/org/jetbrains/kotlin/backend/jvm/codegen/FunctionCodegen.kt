@@ -27,6 +27,7 @@ import org.jetbrains.kotlin.ir.expressions.IrGetValue
 import org.jetbrains.kotlin.ir.expressions.IrVararg
 import org.jetbrains.kotlin.ir.util.*
 import org.jetbrains.kotlin.load.java.JavaDescriptorVisibilities
+import org.jetbrains.kotlin.load.java.JvmAbi
 import org.jetbrains.kotlin.name.JvmNames.JVM_SYNTHETIC_ANNOTATION_FQ_NAME
 import org.jetbrains.kotlin.name.JvmNames.STRICTFP_ANNOTATION_FQ_NAME
 import org.jetbrains.kotlin.name.JvmNames.SYNCHRONIZED_ANNOTATION_FQ_NAME
@@ -36,6 +37,7 @@ import org.jetbrains.kotlin.resolve.jvm.jvmSignature.JvmMethodSignature
 import org.jetbrains.org.objectweb.asm.*
 import org.jetbrains.org.objectweb.asm.commons.InstructionAdapter
 import org.jetbrains.org.objectweb.asm.tree.MethodNode
+import java.util.*
 
 class FunctionCodegen(private val irFunction: IrFunction, private val classCodegen: ClassCodegen) {
     private val context = classCodegen.context
@@ -127,7 +129,44 @@ class FunctionCodegen(private val irFunction: IrFunction, private val classCodeg
             SMAP(sourceMapper.resultMappings)
         }
         methodVisitor.visitEnd()
-        return SMAPAndMethodNode(methodNode, smap)
+
+        val functionToScopes = context.state.globalInlineContext.inlineFunctionToScopes
+        val scopes = functionToScopes[signature.toString()].orEmpty()
+        val node = MethodNode(Opcodes.API_VERSION, methodNode.access, methodNode.name, methodNode.desc, methodNode.signature, methodNode.exceptions.toTypedArray())
+        methodNode.accept(object : MethodVisitor(Opcodes.API_VERSION, InstructionAdapter(node)) {
+            var currentLineNumber = 0
+            val indexToLineNumbers = hashMapOf<Int, Queue<Int>>()
+
+            override fun visitLineNumber(line: Int, start: Label?) {
+                currentLineNumber = line
+                super.visitLineNumber(line, start)
+            }
+
+            override fun visitVarInsn(opcode: Int, `var`: Int) {
+                indexToLineNumbers.computeIfAbsent(`var`) { LinkedList<Int>() }.add(currentLineNumber)
+                super.visitVarInsn(opcode, `var`)
+            }
+
+            override fun visitLocalVariable(
+                name: String, descriptor: String, signature: String?, start: Label, end: Label, index: Int,
+            ) {
+                val lineNumber = indexToLineNumbers[index]?.poll()
+                var newName = name
+                if (lineNumber != null &&
+                    scopes.any { it.lineNumbers.any { it == lineNumber } } &&
+                    !name.startsWith(JvmAbi.LOCAL_VARIABLE_NAME_PREFIX_INLINE_FUNCTION) &&
+                    !name.startsWith(JvmAbi.LOCAL_VARIABLE_NAME_PREFIX_INLINE_ARGUMENT))
+                {
+                    val firstLineNumbers = scopes.mapNotNull { it.lineNumbers.firstOrNull() }.sorted()
+                    val index1 = firstLineNumbers.indexOfFirst { it >= lineNumber }
+                    if (index1 >= 0) {
+                        newName = name.substringBefore("\\") + "\\${index1 + 1}"
+                    }
+                }
+                super.visitLocalVariable(newName, descriptor, signature, start, end, index)
+            }
+        })
+        return SMAPAndMethodNode(node, smap)
     }
 
     private fun shouldGenerateAnnotationsOnValueParameters(): Boolean =

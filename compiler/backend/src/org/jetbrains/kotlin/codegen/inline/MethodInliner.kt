@@ -165,18 +165,11 @@ class MethodInliner(
                     currentLineNumber = line
                 }
 
-                var newLine = line
-                if (GENERATE_SMAP) {
-                    newLine = sourceMapper.mapLineNumber(line);
-                }
-
-                //skip not mapped lines
-                if (newLine >= 0) {
-                    super.visitLineNumber(newLine, start);
-                }
-
+                val newLine = sourceMapper.mapLineNumber(line);
                 result.lineNumbersBeforeRemapping.add(line)
                 result.lineNumbersAfterRemapping.add(newLine)
+
+                super.visitLineNumber(line, start)
             }
 
             private fun handleAnonymousObjectRegeneration() {
@@ -490,22 +483,20 @@ class MethodInliner(
                 }
             }
 
-            override fun visitLocalVariable(
-                name: String, desc: String, signature: String?, start: Label, end: Label, index: Int,
-            ) {
-                val functionToScopes = inliningContext.state.globalInlineContext.inlineFunctionToScopes
-                println(functionToScopes)
-                if (isInliningLambda || GENERATE_DEBUG_INFO) {
-                    val isInlineFunctionMarker = name.startsWith(JvmAbi.LOCAL_VARIABLE_NAME_PREFIX_INLINE_FUNCTION)
-                    val varSuffix = when {
-                        inliningContext.isRoot && !isInlineFunctionMarker -> INLINE_FUN_VAR_SUFFIX
-                        else -> ""
-                    }
-
-                    val varName = if (varSuffix.isNotEmpty() && name == AsmUtil.THIS) AsmUtil.INLINE_DECLARATION_SITE_THIS else name
-                    super.visitLocalVariable(varName + varSuffix, desc, signature, start, end, getNewIndex(index))
-                }
-            }
+//            override fun visitLocalVariable(
+//                name: String, desc: String, signature: String?, start: Label, end: Label, index: Int,
+//            ) {
+//                if (isInliningLambda || GENERATE_DEBUG_INFO) {
+//                    val isInlineFunctionMarker = name.startsWith(JvmAbi.LOCAL_VARIABLE_NAME_PREFIX_INLINE_FUNCTION)
+//                    val varSuffix = when {
+//                        inliningContext.isRoot && !isInlineFunctionMarker -> INLINE_FUN_VAR_SUFFIX
+//                        else -> ""
+//                    }
+//
+//                    val varName = if (varSuffix.isNotEmpty() && name == AsmUtil.THIS) AsmUtil.INLINE_DECLARATION_SITE_THIS else name
+//                    super.visitLocalVariable(varName + varSuffix, desc, signature, start, end, getNewIndex(index))
+//                }
+//            }
         }
 
         node.accept(transformationVisitor)
