@@ -12,7 +12,7 @@ import org.jetbrains.kotlin.diagnostics.Errors
 import org.jetbrains.kotlin.utils.threadLocal
 import java.util.*
 
-data class InlineScope(val functionId: String, val lineNumbers: List<Int>)
+data class InlineScope(val functionId: String, val lineNumbers: List<Int>, val callSiteLineNumber: Int)
 
 class GlobalInlineContext(private val diagnostics: DiagnosticSink) {
     // Ordered set of declarations and inline calls being generated right now.

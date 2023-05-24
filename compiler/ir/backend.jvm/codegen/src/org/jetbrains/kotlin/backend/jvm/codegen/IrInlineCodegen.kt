@@ -156,6 +156,7 @@ class IrInlineCodegen(
         expression: IrFunctionAccessExpression,
         isInsideIfCondition: Boolean,
     ) {
+        val callSiteLineNumber = codegen.lastLineNumber
         val result = performInline(isInsideIfCondition, function.isInlineOnly())
         val functionToScopes = state.globalInlineContext.inlineFunctionToScopes
         val originSignature = codegen.signature.toString()
@@ -168,10 +169,14 @@ class IrInlineCodegen(
         }
 
         for (scope in scopes.orEmpty()) {
-            originScopes.add(InlineScope(scope.functionId, scope.lineNumbers.mapNotNull { old2NewLineNumbers[it] }))
+            originScopes.add(InlineScope(scope.functionId, scope.lineNumbers.mapNotNull { old2NewLineNumbers[it] }, scope.callSiteLineNumber))
         }
 
-        val surroundingInlinedScope = InlineScope(inlinedSignature, result.lineNumbersAfterRemapping)
+        val surroundingInlinedScope = InlineScope(
+            inlinedSignature,
+            result.lineNumbersAfterRemapping,
+            callSiteLineNumber
+        )
         originScopes.add(surroundingInlinedScope)
     }
 

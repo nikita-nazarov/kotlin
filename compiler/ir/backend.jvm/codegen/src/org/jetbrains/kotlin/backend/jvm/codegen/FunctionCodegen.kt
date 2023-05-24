@@ -164,11 +164,11 @@ class FunctionCodegen(private val irFunction: IrFunction, private val classCodeg
             if (!addedParent) {
                 callerScopeIds.add(-1)
             }
-            newScopes.add(InlineScope(scope.functionId, newLineNumbers))
+            newScopes.add(InlineScope(scope.functionId, newLineNumbers, scope.callSiteLineNumber))
         }
 
         for ((i, scope) in newScopes.withIndex()) {
-            smap.inlineScopes.add(InlineScopeInfo(scope.functionId, callerScopeIds[i], 0))
+            smap.inlineScopes.add(InlineScopeInfo(scope.functionId, callerScopeIds[i], scope.callSiteLineNumber))
             smap.scopeMappings.add(ScopeMapping(smap.inlineScopes.lastIndex, scope.lineNumbers))
         }
 
