@@ -411,6 +411,20 @@ class ClassCodegen private constructor(
         )
         val mv = with(node) { visitor.newMethod(method.descriptorOrigin, access, name, desc, signature, exceptions.toTypedArray()) }
         val smapCopier = SourceMapCopier(classSMAP, smap)
+
+        val inlineScopesNum = classSMAP.inlineScopes.size
+        for (mapping in smap.scopeMappings) {
+            mapping.scopeNumber += inlineScopesNum
+        }
+
+        for (scope in smap.inlineScopes) {
+            if (scope.callerScopeId != -1) {
+                scope.callerScopeId += inlineScopesNum
+            }
+        }
+        classSMAP.inlineScopes.addAll(smap.inlineScopes)
+        classSMAP.scopeMappings.addAll(smap.scopeMappings)
+
         val smapCopyingVisitor = object : MethodVisitor(Opcodes.API_VERSION, mv) {
             override fun visitLineNumber(line: Int, start: Label) =
                 super.visitLineNumber(smapCopier.mapLineNumber(line), start)

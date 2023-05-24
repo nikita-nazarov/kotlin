@@ -131,7 +131,47 @@ class FunctionCodegen(private val irFunction: IrFunction, private val classCodeg
         methodVisitor.visitEnd()
 
         val functionToScopes = context.state.globalInlineContext.inlineFunctionToScopes
-        val scopes = functionToScopes[signature.toString()].orEmpty()
+        val scopes = functionToScopes[signature.toString()].orEmpty().sortedBy { it.lineNumbers.firstOrNull() }
+        val lineNumberToLastScopeIdWhereItWasSeen = hashMapOf<Int, Int>()
+        for ((i, scope) in scopes.withIndex()) {
+            for (lineNumber in scope.lineNumbers) {
+                lineNumberToLastScopeIdWhereItWasSeen[lineNumber] = i
+            }
+        }
+
+        val callerScopeIds = mutableListOf<Int>()
+        val newScopes = mutableListOf<InlineScope>()
+        val lineNumberToScopeId = hashMapOf<Int, Int>()
+        for ((i, scope) in scopes.withIndex()) {
+            val newLineNumbers = mutableListOf<Int>()
+            var addedParent = false
+            for (lineNumber in scope.lineNumbers) {
+                val lastScopeId = lineNumberToLastScopeIdWhereItWasSeen[lineNumber]
+                if (lastScopeId == i) {
+                    newLineNumbers.add(lineNumber)
+                }
+
+                if (!addedParent) {
+                    val prevScopeId = lineNumberToScopeId[lineNumber]
+                    if (prevScopeId != null) {
+                        addedParent = true
+                        callerScopeIds.add(prevScopeId)
+                    }
+                }
+                lineNumberToScopeId[lineNumber] = i
+            }
+
+            if (!addedParent) {
+                callerScopeIds.add(-1)
+            }
+            newScopes.add(InlineScope(scope.functionId, newLineNumbers))
+        }
+
+        for ((i, scope) in newScopes.withIndex()) {
+            smap.inlineScopes.add(InlineScopeInfo(scope.functionId, callerScopeIds[i], 0))
+            smap.scopeMappings.add(ScopeMapping(smap.inlineScopes.lastIndex, scope.lineNumbers))
+        }
+
         val node = MethodNode(Opcodes.API_VERSION, methodNode.access, methodNode.name, methodNode.desc, methodNode.signature, methodNode.exceptions.toTypedArray())
         methodNode.accept(object : MethodVisitor(Opcodes.API_VERSION, InstructionAdapter(node)) {
             var currentLineNumber = 0
@@ -143,7 +183,7 @@ class FunctionCodegen(private val irFunction: IrFunction, private val classCodeg
             }
 
             override fun visitVarInsn(opcode: Int, `var`: Int) {
-                indexToLineNumbers.computeIfAbsent(`var`) { LinkedList<Int>() }.add(currentLineNumber)
+                indexToLineNumbers.computeIfAbsent(`var`) { LinkedList() }.add(currentLineNumber)
                 super.visitVarInsn(opcode, `var`)
             }
 
