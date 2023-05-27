@@ -168,14 +168,14 @@ class IrInlineCodegen(
             old2NewLineNumbers[i] = j
         }
 
-        for (scope in scopes.orEmpty()) {
-            originScopes.add(InlineScope(scope.functionId, scope.lineNumbers.mapNotNull { old2NewLineNumbers[it] }, scope.callSiteLineNumber))
+        for (scope in scopes.orEmpty().reversed()) {
+            originScopes.add(InlineScope(scope.functionId, scope.lineNumbers.mapNotNull { old2NewLineNumbers[it] }, scope.callSiteLineNumber, scope.parentScopeId ?: inlinedSignature))
         }
-
         val surroundingInlinedScope = InlineScope(
             inlinedSignature,
             result.lineNumbersAfterRemapping,
-            callSiteLineNumber
+            callSiteLineNumber,
+            null
         )
         originScopes.add(surroundingInlinedScope)
     }

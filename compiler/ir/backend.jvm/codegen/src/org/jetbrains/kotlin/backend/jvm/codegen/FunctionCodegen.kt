@@ -34,10 +34,12 @@ import org.jetbrains.kotlin.name.JvmNames.SYNCHRONIZED_ANNOTATION_FQ_NAME
 import org.jetbrains.kotlin.resolve.annotations.JVM_THROWS_ANNOTATION_FQ_NAME
 import org.jetbrains.kotlin.resolve.jvm.jvmSignature.JvmMethodParameterKind
 import org.jetbrains.kotlin.resolve.jvm.jvmSignature.JvmMethodSignature
+import org.jetbrains.kotlin.utils.addToStdlib.popLast
 import org.jetbrains.org.objectweb.asm.*
 import org.jetbrains.org.objectweb.asm.commons.InstructionAdapter
 import org.jetbrains.org.objectweb.asm.tree.MethodNode
 import java.util.*
+import kotlin.math.max
 
 class FunctionCodegen(private val irFunction: IrFunction, private val classCodegen: ClassCodegen) {
     private val context = classCodegen.context
@@ -131,44 +133,49 @@ class FunctionCodegen(private val irFunction: IrFunction, private val classCodeg
         methodVisitor.visitEnd()
 
         val functionToScopes = context.state.globalInlineContext.inlineFunctionToScopes
-        val scopes = functionToScopes[signature.toString()].orEmpty().sortedBy { it.lineNumbers.firstOrNull() }
+        val scopes = functionToScopes[signature.toString()].orEmpty().reversed()
         val lineNumberToLastScopeIdWhereItWasSeen = hashMapOf<Int, Int>()
+        val nameToIndex = hashMapOf<String, Int>()
+        val callerScopeIds = mutableListOf<Int>()
         for ((i, scope) in scopes.withIndex()) {
+            nameToIndex[scope.functionId] = i
             for (lineNumber in scope.lineNumbers) {
                 lineNumberToLastScopeIdWhereItWasSeen[lineNumber] = i
             }
         }
 
-        val callerScopeIds = mutableListOf<Int>()
-        val newScopes = mutableListOf<InlineScope>()
-        val lineNumberToScopeId = hashMapOf<Int, Int>()
         for ((i, scope) in scopes.withIndex()) {
+            val parentId = scope.parentScopeId
+            val callerScopeId = if (parentId == null) -1 else nameToIndex[parentId]!!
+            callerScopeIds.add(callerScopeId)
+
             val newLineNumbers = mutableListOf<Int>()
-            var addedParent = false
             for (lineNumber in scope.lineNumbers) {
                 val lastScopeId = lineNumberToLastScopeIdWhereItWasSeen[lineNumber]
                 if (lastScopeId == i) {
                     newLineNumbers.add(lineNumber)
                 }
+            }
 
-                if (!addedParent) {
-                    val prevScopeId = lineNumberToScopeId[lineNumber]
-                    if (prevScopeId != null) {
-                        addedParent = true
-                        callerScopeIds.add(prevScopeId)
+            val scopeInfo = if (scope.isInlineLambdaScope()) {
+                var index = callerScopeId
+                while (index != -1 && !scopes[index].isInlineLambdaScope()) {
+                    val parent = scopes[index].parentScopeId
+                    if (parent == null) {
+                        index = -1
+                    } else {
+                        index = nameToIndex[parent]!!
                     }
                 }
-                lineNumberToScopeId[lineNumber] = i
+                val surroundingScopeId = index
+                val parentFunctionName = smap.inlineScopes[callerScopeId].name
+                val originalFunctionName = scope.functionId.substringBefore("$")
+                InlineLambdaScopeInfo("lambda '$parentFunctionName' in '$originalFunctionName'", callerScopeId, scope.callSiteLineNumber, surroundingScopeId)
+            } else {
+                InlineScopeInfo(scope.functionId.substringBefore("("), callerScopeId, scope.callSiteLineNumber)
             }
 
-            if (!addedParent) {
-                callerScopeIds.add(-1)
-            }
-            newScopes.add(InlineScope(scope.functionId, newLineNumbers, scope.callSiteLineNumber))
-        }
-
-        for ((i, scope) in newScopes.withIndex()) {
-            smap.inlineScopes.add(InlineScopeInfo(scope.functionId, callerScopeIds[i], scope.callSiteLineNumber))
+            smap.inlineScopes.add(scopeInfo)
             smap.scopeMappings.add(ScopeMapping(smap.inlineScopes.lastIndex, scope.lineNumbers))
         }
 

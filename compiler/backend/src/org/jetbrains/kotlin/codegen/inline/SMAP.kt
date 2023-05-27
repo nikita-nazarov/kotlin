@@ -55,10 +55,7 @@ object SMAPBuilder {
     private fun List<InlineScopeInfo>.toSMAP(): String =
         buildString {
             for ((i, scope) in this@toSMAP.withIndex()) {
-                append("$i ")
-                val callerId = scope.callerScopeId
-                val callerIdStr = if (callerId == -1) "" else callerId.toString()
-                append("${scope.name}/$callerIdStr/${scope.callSiteLineNumber}\n")
+                append("$i $scope\n")
             }
         }
 
@@ -116,8 +113,21 @@ class SourceMapCopier(val parent: SourceMapper, private val smap: SMAP, val call
 }
 
 data class SourcePosition(val line: Int, val file: String, val path: String)
-data class InlineScopeInfo(val name: String, var callerScopeId: Int, val callSiteLineNumber: Int)
 data class ScopeMapping(var scopeNumber: Int, val lineNumbers: List<Int>)
+
+open class InlineScopeInfo(val name: String, var callerScopeId: Int, val callSiteLineNumber: Int) {
+    override fun toString(): String {
+        val callerScopeIdStr = if (callerScopeId < 0) "" else callerScopeId.toString()
+        return "$name/$callerScopeIdStr/$callSiteLineNumber"
+    }
+}
+
+class InlineLambdaScopeInfo(name: String, callerScopeId: Int, callSiteLineNumber: Int, val surroundingScopeId: Int) : InlineScopeInfo(name, callerScopeId, callSiteLineNumber) {
+    override fun toString(): String {
+        val surroundingScopeIdStr = if (surroundingScopeId < 0) "" else surroundingScopeId.toString()
+        return "${super.toString()}/$surroundingScopeIdStr/"
+    }
+}
 
 class SourceMapper(val sourceInfo: SourceInfo?) {
     private var maxUsedValue: Int = sourceInfo?.linesInFile ?: 0

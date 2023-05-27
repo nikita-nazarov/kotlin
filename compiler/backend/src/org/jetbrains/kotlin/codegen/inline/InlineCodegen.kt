@@ -108,10 +108,12 @@ abstract class InlineCodegen<out T : BaseExpressionCodegen>(
         val sourceInfo = sourceMapper.sourceInfo!!
         val callSite = SourcePosition(codegen.lastLineNumber, sourceInfo.sourceFileName!!, sourceInfo.pathOrCleanFQN)
         val inliner = MethodInliner(
-            node, parameters, info, FieldRemapper(null, null, parameters), sourceCompiler.isCallInsideSameModuleAsCallee,
-            "Method inlining " + sourceCompiler.callElementText,
+            node, parameters, info, FieldRemapper(null, null, parameters),
+            sourceCompiler.isCallInsideSameModuleAsCallee, "Method inlining " + sourceCompiler.callElementText,
             SourceMapCopier(sourceMapper, nodeAndSmap.classSMAP, callSite),
-            info.callSiteInfo, isInlineOnly, !isInlinedToInlineFunInKotlinRuntime(), maskStartIndex, maskStartIndex + maskValues.size,
+            info.callSiteInfo, state.globalInlineContext, isInlineOnly,
+            !isInlinedToInlineFunInKotlinRuntime(), maskStartIndex,
+            maskStartIndex + maskValues.size,
         ) //with captured
 
         val remapper = LocalVarRemapper(parameters, initialFrameSize)
