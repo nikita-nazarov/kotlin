@@ -179,41 +179,7 @@ class FunctionCodegen(private val irFunction: IrFunction, private val classCodeg
             smap.scopeMappings.add(ScopeMapping(smap.inlineScopes.lastIndex, scope.lineNumbers))
         }
 
-        val node = MethodNode(Opcodes.API_VERSION, methodNode.access, methodNode.name, methodNode.desc, methodNode.signature, methodNode.exceptions.toTypedArray())
-        methodNode.accept(object : MethodVisitor(Opcodes.API_VERSION, InstructionAdapter(node)) {
-            var currentLineNumber = 0
-            val indexToLineNumbers = hashMapOf<Int, Queue<Int>>()
-
-            override fun visitLineNumber(line: Int, start: Label?) {
-                currentLineNumber = line
-                super.visitLineNumber(line, start)
-            }
-
-            override fun visitVarInsn(opcode: Int, `var`: Int) {
-                indexToLineNumbers.computeIfAbsent(`var`) { LinkedList() }.add(currentLineNumber)
-                super.visitVarInsn(opcode, `var`)
-            }
-
-            override fun visitLocalVariable(
-                name: String, descriptor: String, signature: String?, start: Label, end: Label, index: Int,
-            ) {
-                val lineNumber = indexToLineNumbers[index]?.poll()
-                var newName = name
-                if (lineNumber != null &&
-                    scopes.any { it.lineNumbers.any { it == lineNumber } } &&
-                    !name.startsWith(JvmAbi.LOCAL_VARIABLE_NAME_PREFIX_INLINE_FUNCTION) &&
-                    !name.startsWith(JvmAbi.LOCAL_VARIABLE_NAME_PREFIX_INLINE_ARGUMENT))
-                {
-                    val firstLineNumbers = scopes.mapNotNull { it.lineNumbers.firstOrNull() }.sorted()
-                    val index1 = firstLineNumbers.indexOfFirst { it >= lineNumber }
-                    if (index1 >= 0) {
-                        newName = name.substringBefore("\\") + "\\${index1 + 1}"
-                    }
-                }
-                super.visitLocalVariable(newName, descriptor, signature, start, end, index)
-            }
-        })
-        return SMAPAndMethodNode(node, smap)
+        return SMAPAndMethodNode(methodNode, smap)
     }
 
     private fun shouldGenerateAnnotationsOnValueParameters(): Boolean =

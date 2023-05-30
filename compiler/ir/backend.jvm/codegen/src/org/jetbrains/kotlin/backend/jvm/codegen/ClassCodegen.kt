@@ -42,6 +42,7 @@ import org.jetbrains.kotlin.ir.types.classOrNull
 import org.jetbrains.kotlin.ir.types.getArrayElementType
 import org.jetbrains.kotlin.ir.types.isArray
 import org.jetbrains.kotlin.ir.util.*
+import org.jetbrains.kotlin.load.java.JvmAbi
 import org.jetbrains.kotlin.load.java.JvmAnnotationNames
 import org.jetbrains.kotlin.load.kotlin.TypeMappingMode
 import org.jetbrains.kotlin.load.kotlin.header.KotlinClassHeader
@@ -61,8 +62,12 @@ import org.jetbrains.kotlin.resolve.jvm.diagnostics.RawSignature
 import org.jetbrains.kotlin.resolve.jvm.jvmSignature.JvmClassSignature
 import org.jetbrains.kotlin.utils.addToStdlib.firstIsInstanceOrNull
 import org.jetbrains.org.objectweb.asm.*
+import org.jetbrains.org.objectweb.asm.commons.InstructionAdapter
 import org.jetbrains.org.objectweb.asm.commons.Method
+import org.jetbrains.org.objectweb.asm.tree.MethodNode
 import java.io.File
+import java.util.*
+import kotlin.math.max
 
 class ClassCodegen private constructor(
     val irClass: IrClass,
@@ -404,13 +409,7 @@ class ClassCodegen private constructor(
             return
         }
 
-        val (node, smap) = generateMethodNode(method)
-        node.preprocessSuspendMarkers(
-            method.origin == JvmLoweredDeclarationOrigin.FOR_INLINE_STATE_MACHINE_TEMPLATE || method.isEffectivelyInlineOnly(),
-            method.origin == JvmLoweredDeclarationOrigin.FOR_INLINE_STATE_MACHINE_TEMPLATE_CAPTURES_CROSSINLINE
-        )
-        val mv = with(node) { visitor.newMethod(method.descriptorOrigin, access, name, desc, signature, exceptions.toTypedArray()) }
-        val smapCopier = SourceMapCopier(classSMAP, smap)
+        val (methodNode, smap) = generateMethodNode(method)
 
         val inlineScopesNum = classSMAP.inlineScopes.size
         for (mapping in smap.scopeMappings) {
@@ -425,6 +424,54 @@ class ClassCodegen private constructor(
         classSMAP.inlineScopes.addAll(smap.inlineScopes)
         classSMAP.scopeMappings.addAll(smap.scopeMappings)
 
+        val node = MethodNode(Opcodes.API_VERSION, methodNode.access, methodNode.name, methodNode.desc, methodNode.signature, methodNode.exceptions.toTypedArray())
+        val scopes = smap.scopeMappings
+        methodNode.accept(object : MethodVisitor(Opcodes.API_VERSION, InstructionAdapter(node)) {
+            var currentLineNumber = 0
+            val indexToLineNumbers = hashMapOf<Int, Queue<Int>>()
+
+            override fun visitLineNumber(line: Int, start: Label?) {
+                currentLineNumber = line
+                super.visitLineNumber(line, start)
+            }
+
+            override fun visitVarInsn(opcode: Int, `var`: Int) {
+                indexToLineNumbers.computeIfAbsent(`var`) { LinkedList() }.add(currentLineNumber)
+                super.visitVarInsn(opcode, `var`)
+            }
+
+            override fun visitLocalVariable(
+                name: String, descriptor: String, signature: String?, start: Label, end: Label, index: Int,
+            ) {
+                val lineNumber = indexToLineNumbers[index]?.poll()
+                var newName = name
+                if (lineNumber != null &&
+                    scopes.any { it.lineNumbers.any { it == lineNumber } } &&
+                    !name.startsWith(JvmAbi.LOCAL_VARIABLE_NAME_PREFIX_INLINE_FUNCTION) &&
+                    !name.startsWith(JvmAbi.LOCAL_VARIABLE_NAME_PREFIX_INLINE_ARGUMENT))
+                {
+                    var matchingLineNumber: Int = -1
+                    var indexOfMatchingLineNumber: Int = -1
+                    for ((i, scope) in scopes.withIndex()) {
+                        val ln = scope.lineNumbers.firstOrNull() ?: continue
+                        if (ln <= lineNumber && ln > matchingLineNumber) {
+                            matchingLineNumber = ln
+                            indexOfMatchingLineNumber = i
+                        }
+                    }
+                    if (indexOfMatchingLineNumber >= 0) {
+                        newName = name.substringBefore("\\") + "\\${scopes[indexOfMatchingLineNumber].scopeNumber}"
+                    }
+                }
+                super.visitLocalVariable(newName, descriptor, signature, start, end, index)
+            }
+        })
+
+        node.preprocessSuspendMarkers(method.origin == JvmLoweredDeclarationOrigin.FOR_INLINE_STATE_MACHINE_TEMPLATE || method.isEffectivelyInlineOnly(),
+            method.origin == JvmLoweredDeclarationOrigin.FOR_INLINE_STATE_MACHINE_TEMPLATE_CAPTURES_CROSSINLINE
+        )
+        val mv = with(node) { visitor.newMethod(method.descriptorOrigin, access, name, desc, signature, exceptions.toTypedArray()) }
+        val smapCopier = SourceMapCopier(classSMAP, smap)
         val smapCopyingVisitor = object : MethodVisitor(Opcodes.API_VERSION, mv) {
             override fun visitLineNumber(line: Int, start: Label) =
                 super.visitLineNumber(smapCopier.mapLineNumber(line), start)
