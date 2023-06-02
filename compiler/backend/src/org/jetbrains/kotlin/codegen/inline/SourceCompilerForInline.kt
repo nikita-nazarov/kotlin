@@ -48,6 +48,8 @@ interface SourceCompilerForInline {
 
     val sourceMapper: SourceMapper
 
+    val fqName: FqName?
+
     fun generateLambdaBody(lambdaInfo: ExpressionLambda, reifiedTypeParameters: ReifiedTypeParametersUsages): SMAPAndMethodNode
 
     fun compileInlineFunction(jvmSignature: JvmMethodSignature): SMAPAndMethodNode

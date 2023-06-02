@@ -21,10 +21,7 @@ import org.jetbrains.kotlin.ir.declarations.IrValueParameter
 import org.jetbrains.kotlin.ir.descriptors.toIrBasedKotlinType
 import org.jetbrains.kotlin.ir.expressions.*
 import org.jetbrains.kotlin.ir.types.IrType
-import org.jetbrains.kotlin.ir.util.dump
-import org.jetbrains.kotlin.ir.util.explicitParameters
-import org.jetbrains.kotlin.ir.util.getArgumentsWithIr
-import org.jetbrains.kotlin.ir.util.isSuspendFunction
+import org.jetbrains.kotlin.ir.util.*
 import org.jetbrains.kotlin.resolve.jvm.AsmTypes
 import org.jetbrains.kotlin.resolve.jvm.jvmSignature.JvmMethodSignature
 import org.jetbrains.kotlin.types.KotlinType
@@ -159,18 +156,18 @@ class IrInlineCodegen(
         val callSiteLineNumber = codegen.lastLineNumber
         val result = performInline(isInsideIfCondition, function.isInlineOnly())
         val functionToScopes = state.globalInlineContext.inlineFunctionToScopes
-        val originSignature = codegen.signature.toString()
+        // TODO: maybe there is a better way to extract a function package name?
+        val originPackageName = codegen.irFunction.fqNameWhenAvailable?.asString()?.substringBeforeLast(".")?.plus(".") ?: ""
+        val inlinedPackageName = function.fqNameWhenAvailable?.asString()?.substringBeforeLast(".")?.plus(".") ?: ""
+        val originSignature = originPackageName + codegen.signature.toString()
         val originScopes = functionToScopes.getOrPut(originSignature) { mutableListOf() }
-        val inlinedSignature = jvmSignature.toString()
+        val inlinedSignature = inlinedPackageName + jvmSignature.toString()
         val scopes = functionToScopes[inlinedSignature]
         val old2NewLineNumbers = hashMapOf<Int, Int>()
         for ((i, j) in result.lineNumbersBeforeRemapping.zip(result.lineNumbersAfterRemapping)) {
             old2NewLineNumbers[i] = j
         }
 
-        for (scope in scopes.orEmpty().reversed()) {
-            originScopes.add(InlineScope(scope.functionId, scope.lineNumbers.mapNotNull { old2NewLineNumbers[it] }, scope.callSiteLineNumber, scope.parentScopeId ?: inlinedSignature))
-        }
         val surroundingInlinedScope = InlineScope(
             inlinedSignature,
             result.lineNumbersAfterRemapping,
@@ -178,6 +175,9 @@ class IrInlineCodegen(
             null
         )
         originScopes.add(surroundingInlinedScope)
+        for (scope in scopes.orEmpty()) {
+            originScopes.add(InlineScope(scope.functionId, scope.lineNumbers.mapNotNull { old2NewLineNumbers[it] }, scope.callSiteLineNumber, scope.parentScopeId ?: inlinedSignature))
+        }
     }
 
     override fun genCycleStub(text: String, codegen: ExpressionCodegen) {

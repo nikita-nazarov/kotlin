@@ -34,12 +34,9 @@ import org.jetbrains.kotlin.name.JvmNames.SYNCHRONIZED_ANNOTATION_FQ_NAME
 import org.jetbrains.kotlin.resolve.annotations.JVM_THROWS_ANNOTATION_FQ_NAME
 import org.jetbrains.kotlin.resolve.jvm.jvmSignature.JvmMethodParameterKind
 import org.jetbrains.kotlin.resolve.jvm.jvmSignature.JvmMethodSignature
-import org.jetbrains.kotlin.utils.addToStdlib.popLast
 import org.jetbrains.org.objectweb.asm.*
 import org.jetbrains.org.objectweb.asm.commons.InstructionAdapter
 import org.jetbrains.org.objectweb.asm.tree.MethodNode
-import java.util.*
-import kotlin.math.max
 
 class FunctionCodegen(private val irFunction: IrFunction, private val classCodegen: ClassCodegen) {
     private val context = classCodegen.context
@@ -133,18 +130,54 @@ class FunctionCodegen(private val irFunction: IrFunction, private val classCodeg
         methodVisitor.visitEnd()
 
         val functionToScopes = context.state.globalInlineContext.inlineFunctionToScopes
-        val scopes = functionToScopes[signature.toString()].orEmpty().reversed()
+        val packageName = irFunction.fqNameWhenAvailable?.asString()?.substringBeforeLast(".")?.plus(".") ?: ""
+        val scopes = functionToScopes["$packageName$signature"].orEmpty()
         val lineNumberToLastScopeIdWhereItWasSeen = hashMapOf<Int, Int>()
         val nameToIndex = hashMapOf<String, Int>()
         val callerScopeIds = mutableListOf<Int>()
+        val children = List<MutableList<Int>>(scopes.size) { mutableListOf() }
         for ((i, scope) in scopes.withIndex()) {
+            nameToIndex[scope.functionId] = i
+        }
+
+        val roots = mutableListOf<Int>()
+        for ((i, scope) in scopes.withIndex()) {
+            val parent = scope.parentScopeId
+            if (parent != null) {
+                children[nameToIndex[parent]!!].add(i)
+            } else {
+                roots.add(i)
+            }
+        }
+
+        val ids = MutableList<Int>(scopes.size) { 0 }
+        val visited = MutableList<Boolean>(scopes.size) { false }
+        var currentId = 0
+        fun dfs(v: Int) {
+            ids[v] = currentId
+            visited[v] = true
+            currentId += 1
+
+            for (child in children[v]) {
+               if (!visited[child]) {
+                   dfs(child)
+               }
+            }
+        }
+
+        for (i in roots) {
+            dfs(i)
+        }
+
+        val sortedScopes = scopes.withIndex().sortedBy { (i, _) -> ids[i] }.map { it.value }
+        for ((i, scope) in sortedScopes.withIndex()) {
             nameToIndex[scope.functionId] = i
             for (lineNumber in scope.lineNumbers) {
                 lineNumberToLastScopeIdWhereItWasSeen[lineNumber] = i
             }
         }
 
-        for ((i, scope) in scopes.withIndex()) {
+        for ((i, scope) in sortedScopes.withIndex()) {
             val parentId = scope.parentScopeId
             val callerScopeId = if (parentId == null) -1 else nameToIndex[parentId]!!
             callerScopeIds.add(callerScopeId)
@@ -159,8 +192,8 @@ class FunctionCodegen(private val irFunction: IrFunction, private val classCodeg
 
             val scopeInfo = if (scope.isInlineLambdaScope()) {
                 var index = callerScopeId
-                while (index != -1 && !scopes[index].isInlineLambdaScope()) {
-                    val parent = scopes[index].parentScopeId
+                while (index != -1 && !sortedScopes[index].isInlineLambdaScope()) {
+                    val parent = sortedScopes[index].parentScopeId
                     if (parent == null) {
                         index = -1
                     } else {
@@ -176,7 +209,7 @@ class FunctionCodegen(private val irFunction: IrFunction, private val classCodeg
             }
 
             smap.inlineScopes.add(scopeInfo)
-            smap.scopeMappings.add(ScopeMapping(smap.inlineScopes.lastIndex, scope.lineNumbers))
+            smap.scopeMappings.add(ScopeMapping(smap.inlineScopes.lastIndex, newLineNumbers))
         }
 
         return SMAPAndMethodNode(methodNode, smap)

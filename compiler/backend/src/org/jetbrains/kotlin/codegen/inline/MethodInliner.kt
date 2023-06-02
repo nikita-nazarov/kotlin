@@ -314,8 +314,8 @@ class MethodInliner(
                     val lambdaResult =
                         inliner.doInline(localVariablesSorter, varRemapper, true, info.returnLabels, invokeCall.finallyDepthShift)
 
-                    val lambdaInvokeMethodSignature = info.invokeMethod.toString()
-                    val methodLambdaIsInlinedToSignature = inliningContext.callSiteInfo.method.toString()
+                    val lambdaInvokeMethodSignature = info.lambdaClassType.className.substringBefore("$") + "." + info.invokeMethod.toString()
+                    val methodLambdaIsInlinedToSignature = inliningContext.callSiteInfo.ownerClassName.replace("/", ".") + "." + inliningContext.callSiteInfo.method.toString()
                     val old2NewLineNumbers = hashMapOf<Int, Int>()
                     for ((i, j) in lambdaResult.lineNumbersBeforeRemapping.zip(lambdaResult.lineNumbersAfterRemapping)) {
                         old2NewLineNumbers[i] = j
@@ -324,18 +324,19 @@ class MethodInliner(
                     val functionToScopes = globalInlineContext.inlineFunctionToScopes
                     val originScopes = functionToScopes.getOrPut(methodLambdaIsInlinedToSignature) { mutableListOf() }
 
-                    val scopes = functionToScopes[lambdaInvokeMethodSignature]
-                    for (scope in scopes.orEmpty().reversed()) {
-                        originScopes.add(InlineScope(scope.functionId, scope.lineNumbers.mapNotNull { old2NewLineNumbers[it] }, scope.callSiteLineNumber, scope.parentScopeId ?: lambdaInvokeMethodSignature))
-                    }
-
+                    val parentPackage = inliningContext.root.sourceCompilerForInline.fqName?.asString()?.substringBeforeLast(".")?.plus(".") ?: ""
+                    val parentName = parentPackage + node.name + node.desc
                     val lambdaScope = InlineScope(
                         lambdaInvokeMethodSignature,
                         lambdaResult.lineNumbersAfterRemapping,
                         sourceMapper.callSite?.line ?: -1,
-                        node.name + node.desc
+                        parentName
                     )
                     originScopes.add(lambdaScope)
+                    val scopes = functionToScopes[lambdaInvokeMethodSignature]
+                    for (scope in scopes.orEmpty()) {
+                        originScopes.add(InlineScope(scope.functionId, scope.lineNumbers.mapNotNull { old2NewLineNumbers[it] }, scope.callSiteLineNumber, scope.parentScopeId ?: lambdaInvokeMethodSignature))
+                    }
 
                     result.mergeWithNotChangeInfo(lambdaResult)
                     result.reifiedTypeParametersUsages.mergeAll(lambdaResult.reifiedTypeParametersUsages)
