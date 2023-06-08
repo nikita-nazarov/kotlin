@@ -27,7 +27,8 @@ abstract class InlineCodegen<out T : BaseExpressionCodegen>(
     protected val jvmSignature: JvmMethodSignature,
     private val typeParameterMappings: TypeParameterMappings<*>,
     protected val sourceCompiler: SourceCompilerForInline,
-    private val reifiedTypeInliner: ReifiedTypeInliner<*>
+    private val reifiedTypeInliner: ReifiedTypeInliner<*>,
+    private val parentSignature: JvmMethodSignature? = null,
 ) {
     private val initialFrameSize = codegen.frameMap.currentSize
 
@@ -111,9 +112,9 @@ abstract class InlineCodegen<out T : BaseExpressionCodegen>(
             node, parameters, info, FieldRemapper(null, null, parameters),
             sourceCompiler.isCallInsideSameModuleAsCallee, "Method inlining " + sourceCompiler.callElementText,
             SourceMapCopier(sourceMapper, nodeAndSmap.classSMAP, callSite),
-            info.callSiteInfo, state.globalInlineContext, isInlineOnly,
+            info.callSiteInfo, state.globalInlineContext, parentSignature, isInlineOnly,
             !isInlinedToInlineFunInKotlinRuntime(), maskStartIndex,
-            maskStartIndex + maskValues.size,
+            maskStartIndex + maskValues.size
         ) //with captured
 
         val remapper = LocalVarRemapper(parameters, initialFrameSize)

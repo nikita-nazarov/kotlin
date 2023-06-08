@@ -55,17 +55,29 @@ object SMAPBuilder {
     private fun List<InlineScopeInfo>.toSMAP(): String =
         buildString {
             for ((i, scope) in this@toSMAP.withIndex()) {
-                append("$i $scope\n")
+                val scopeInfo = with(scope) {
+                    val callerScopeIdStr = if (callerScopeId < 0) "" else callerScopeId.toString()
+                    if (this is InlineLambdaScopeInfo) {
+                        val surroundingScopeIdStr = if (surroundingScopeId < 0) "" else surroundingScopeId.toString()
+                        "$name/$i/$callerScopeIdStr/$callSiteLineNumber/$surroundingScopeIdStr/"
+                    } else {
+                        "$name/$i/$callerScopeIdStr/$callSiteLineNumber"
+                    }
+                }
+                append("$i $scopeInfo\n")
             }
         }
 
     private fun ScopeMapping.toSMAP(): String =
         buildString {
-            val ranges = lineNumbers.toRanges()
-            for (range in ranges) {
-                val size = range.endInclusive - range.start + 1
-                append("${range.start}#${scopeNumber},$size:0\n")
+            for (lineNumber in lineNumbers) {
+                append("$lineNumber#$scopeNumber:$lineNumber\n")
             }
+//            val ranges = lineNumbers.toRanges()
+//            for (range in ranges) {
+//                val size = range.endInclusive - range.start + 1
+//                append("${range.start}#${scopeNumber},$size:0\n")
+//            }
         }
 
     private fun List<Int>.toRanges(): List<ClosedRange<Int>> {

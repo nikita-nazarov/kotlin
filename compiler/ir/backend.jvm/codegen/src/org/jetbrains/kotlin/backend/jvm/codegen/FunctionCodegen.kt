@@ -159,9 +159,9 @@ class FunctionCodegen(private val irFunction: IrFunction, private val classCodeg
             currentId += 1
 
             for (child in children[v]) {
-               if (!visited[child]) {
-                   dfs(child)
-               }
+                if (!visited[child]) {
+                    dfs(child)
+                }
             }
         }
 

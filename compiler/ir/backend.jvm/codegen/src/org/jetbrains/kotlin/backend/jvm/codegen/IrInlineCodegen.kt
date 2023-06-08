@@ -37,7 +37,7 @@ class IrInlineCodegen(
     sourceCompiler: SourceCompilerForInline,
     reifiedTypeInliner: ReifiedTypeInliner<IrType>
 ) :
-    InlineCodegen<ExpressionCodegen>(codegen, state, signature, typeParameterMappings, sourceCompiler, reifiedTypeInliner),
+    InlineCodegen<ExpressionCodegen>(codegen, state, signature, typeParameterMappings, sourceCompiler, reifiedTypeInliner, codegen.signature),
     IrInlineCallGenerator {
 
     private val inlineArgumentsInPlace = canInlineArgumentsInPlace()
@@ -176,7 +176,10 @@ class IrInlineCodegen(
         )
         originScopes.add(surroundingInlinedScope)
         for (scope in scopes.orEmpty()) {
-            originScopes.add(InlineScope(scope.functionId, scope.lineNumbers.mapNotNull { old2NewLineNumbers[it] }, scope.callSiteLineNumber, scope.parentScopeId ?: inlinedSignature))
+            with (scope) {
+                val newCallSiteLineNumber = old2NewLineNumbers[scope.callSiteLineNumber] ?: scope.callSiteLineNumber
+                originScopes.add(InlineScope(functionId, lineNumbers.mapNotNull { old2NewLineNumbers[it] }, newCallSiteLineNumber, parentScopeId ?: inlinedSignature))
+            }
         }
     }
 
