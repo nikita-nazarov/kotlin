@@ -131,45 +131,9 @@ class FunctionCodegen(private val irFunction: IrFunction, private val classCodeg
 
         val functionToScopes = context.state.globalInlineContext.inlineFunctionToScopes
         val packageName = irFunction.fqNameWhenAvailable?.asString()?.substringBeforeLast(".")?.plus(".") ?: ""
-        val scopes = functionToScopes["$packageName$signature"].orEmpty()
-        val lineNumberToLastScopeIdWhereItWasSeen = hashMapOf<Int, Int>()
+        val sortedScopes = functionToScopes["$packageName$signature"].orEmpty().arranged()
         val nameToIndex = hashMapOf<String, Int>()
-        val callerScopeIds = mutableListOf<Int>()
-        val children = List<MutableList<Int>>(scopes.size) { mutableListOf() }
-        for ((i, scope) in scopes.withIndex()) {
-            nameToIndex[scope.functionId] = i
-        }
-
-        val roots = mutableListOf<Int>()
-        for ((i, scope) in scopes.withIndex()) {
-            val parent = scope.parentScopeId
-            if (parent != null) {
-                children[nameToIndex[parent]!!].add(i)
-            } else {
-                roots.add(i)
-            }
-        }
-
-        val ids = MutableList<Int>(scopes.size) { 0 }
-        val visited = MutableList<Boolean>(scopes.size) { false }
-        var currentId = 0
-        fun dfs(v: Int) {
-            ids[v] = currentId
-            visited[v] = true
-            currentId += 1
-
-            for (child in children[v]) {
-                if (!visited[child]) {
-                    dfs(child)
-                }
-            }
-        }
-
-        for (i in roots) {
-            dfs(i)
-        }
-
-        val sortedScopes = scopes.withIndex().sortedBy { (i, _) -> ids[i] }.map { it.value }
+        val lineNumberToLastScopeIdWhereItWasSeen = hashMapOf<Int, Int>()
         for ((i, scope) in sortedScopes.withIndex()) {
             nameToIndex[scope.functionId] = i
             for (lineNumber in scope.lineNumbers) {
@@ -180,7 +144,6 @@ class FunctionCodegen(private val irFunction: IrFunction, private val classCodeg
         for ((i, scope) in sortedScopes.withIndex()) {
             val parentId = scope.parentScopeId
             val callerScopeId = if (parentId == null) -1 else nameToIndex[parentId]!!
-            callerScopeIds.add(callerScopeId)
 
             val newLineNumbers = mutableListOf<Int>()
             for (lineNumber in scope.lineNumbers) {

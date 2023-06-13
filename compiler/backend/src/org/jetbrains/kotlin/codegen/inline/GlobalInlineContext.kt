@@ -62,3 +62,43 @@ class GlobalInlineContext(private val diagnostics: DiagnosticSink) {
 
     fun isTypeFromInlineFunction(type: String) = typesUsedInInlineFunctions.peek().contains(type)
 }
+
+fun List<InlineScope>.arranged(): List<InlineScope> {
+    val nameToIndex = hashMapOf<String, Int>()
+    for ((i, scope) in withIndex()) {
+        nameToIndex[scope.functionId] = i
+    }
+
+    val children = Array<MutableList<Int>>(size) { mutableListOf() }
+    val roots = mutableListOf<Int>()
+    for ((i, scope) in withIndex()) {
+        val parent = scope.parentScopeId
+        if (parent != null) {
+            children[nameToIndex[parent]!!].add(i)
+        } else {
+            roots.add(i)
+        }
+    }
+
+    val ids = Array<Int>(size) { 0 }
+    val visited = Array<Boolean>(size) { false }
+    var currentId = 0
+    fun dfs(v: Int) {
+        ids[v] = currentId
+        visited[v] = true
+        currentId += 1
+
+        for (child in children[v]) {
+            if (!visited[child]) {
+                dfs(child)
+            }
+        }
+    }
+
+    for (i in roots) {
+        dfs(i)
+    }
+
+    val sortedScopes = withIndex().sortedBy { (i, _) -> ids[i] }.map { it.value }
+    return sortedScopes
+}
