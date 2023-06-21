@@ -168,7 +168,7 @@ class MethodInliner(
                     currentLineNumber = line
                 }
 
-                val newLine = sourceMapper.mapLineNumber(line);
+                val newLine = sourceMapper.mapLineNumber(line)
                 result.lineNumbersBeforeRemapping.add(line)
                 result.lineNumbersAfterRemapping.add(newLine)
 
@@ -308,7 +308,7 @@ class MethodInliner(
                         if (info is DefaultLambda) isSameModule else true /*cause all nested objects in same module as lambda*/,
                         "Lambda inlining " + info.lambdaClassType.internalName,
                         SourceMapCopier(sourceMapper.parent, info.node.classSMAP, callSite),
-                        inlineCallSiteInfo, globalInlineContext,
+                        inlineCallSiteInfo, globalInlineContext
                     )
 
                     val varRemapper = LocalVarRemapper(lambdaParameters, valueParamShift)
@@ -316,8 +316,10 @@ class MethodInliner(
                     val lambdaResult =
                         inliner.doInline(localVariablesSorter, varRemapper, true, info.returnLabels, invokeCall.finallyDepthShift)
 
-                    val lambdaInvokeMethodSignature = info.lambdaClassType.className.substringBefore("$") + "." + info.invokeMethod.toString()
-                    val methodLambdaIsInlinedToSignature = inliningContext.callSiteInfo.ownerClassName.replace("/", ".") + "." + parentSignature.toString()
+                    val lambdaInvokeMethodSignature =
+                        info.lambdaClassType.className.substringBefore("$") + "." + info.invokeMethod.toString()
+                    val methodLambdaIsInlinedToSignature =
+                        inliningContext.callSiteInfo.ownerClassName.replace("/", ".") + "." + parentSignature.toString()
                     val old2NewLineNumbers = hashMapOf<Int, Int>()
                     for ((i, j) in lambdaResult.lineNumbersBeforeRemapping.zip(lambdaResult.lineNumbersAfterRemapping)) {
                         old2NewLineNumbers[i] = j
@@ -325,8 +327,9 @@ class MethodInliner(
 
                     val functionToScopes = globalInlineContext.inlineFunctionToScopes
 
-                    val parentPackage = inliningContext.root.sourceCompilerForInline.fqName?.asString()?.substringBeforeLast(".")?.plus(".") ?: ""
-                    val parentName = parentPackage + node.name + node.desc
+                    val parentPackage =
+                        inliningContext.root.sourceCompilerForInline.fqName?.asString()?.substringBeforeLast(".")?.plus(".") ?: ""
+                    val parentName = parentPackage + node.name + node.signature.replace("<.+>".toRegex(), "")
                     val originScopes = functionToScopes.getOrPut(methodLambdaIsInlinedToSignature) { mutableListOf() }
                     val lambdaScope = InlineScope(
                         lambdaInvokeMethodSignature,
@@ -337,9 +340,17 @@ class MethodInliner(
                     originScopes.add(lambdaScope)
                     val scopes = functionToScopes[lambdaInvokeMethodSignature]
                     for (scope in scopes.orEmpty()) {
-                        with (scope) {
-                            val newCallSiteLineNumber = old2NewLineNumbers[callSiteLineNumber] ?: callSiteLineNumber // TODO: figure out if we need to do the remapping for inline lambdas
-                            originScopes.add(InlineScope(functionId, lineNumbers.mapNotNull { old2NewLineNumbers[it] }, newCallSiteLineNumber, parentScopeId ?: lambdaInvokeMethodSignature))
+                        with(scope) {
+                            val newCallSiteLineNumber = old2NewLineNumbers[callSiteLineNumber]
+                                ?: callSiteLineNumber
+                            originScopes.add(
+                                InlineScope(
+                                    functionId,
+                                    lineNumbers.mapNotNull { old2NewLineNumbers[it] },
+                                    newCallSiteLineNumber,
+                                    parentScopeId ?: lambdaInvokeMethodSignature
+                                )
+                            )
                         }
                     }
 
@@ -452,6 +463,8 @@ class MethodInliner(
         )
 
         val transformationVisitor = object : InlineMethodInstructionAdapter(transformedNode) {
+            val seenIndices = mutableSetOf<Int>()
+
             private val GENERATE_DEBUG_INFO = GENERATE_SMAP && !overrideLineNumber
 
             private val isInliningLambda = nodeRemapper.isInsideInliningLambda
@@ -477,7 +490,9 @@ class MethodInliner(
             }
 
             override fun visitVarInsn(opcode: Int, `var`: Int) {
-                super.visitVarInsn(opcode, getNewIndex(`var`))
+                val newIndex = getNewIndex(`var`)
+                seenIndices.add(newIndex)
+                super.visitVarInsn(opcode, newIndex)
             }
 
             override fun visitIincInsn(`var`: Int, increment: Int) {
@@ -515,20 +530,17 @@ class MethodInliner(
                 }
             }
 
-//            override fun visitLocalVariable(
-//                name: String, desc: String, signature: String?, start: Label, end: Label, index: Int,
-//            ) {
-//                if (isInliningLambda || GENERATE_DEBUG_INFO) {
-//                    val isInlineFunctionMarker = name.startsWith(JvmAbi.LOCAL_VARIABLE_NAME_PREFIX_INLINE_FUNCTION)
-//                    val varSuffix = when {
-//                        inliningContext.isRoot && !isInlineFunctionMarker -> INLINE_FUN_VAR_SUFFIX
-//                        else -> ""
-//                    }
-//
-//                    val varName = if (varSuffix.isNotEmpty() && name == AsmUtil.THIS) AsmUtil.INLINE_DECLARATION_SITE_THIS else name
-//                    super.visitLocalVariable(varName + varSuffix, desc, signature, start, end, getNewIndex(index))
-//                }
-//            }
+            override fun visitLocalVariable(
+                name: String, descriptor: String, signature: String?, start: Label, end: Label, index: Int,
+            ) {
+                var newName = name
+                // When inlining function arguments will not be visited by `visitVarInsn` method,
+                // which allows us to add a mock name here to assign the correct scope later
+                if (index !in seenIndices) {
+                    newName = "$name\\giveMeAScope"
+                }
+                super.visitLocalVariable(newName, descriptor, signature, start, end, index)
+            }
         }
 
         node.accept(transformationVisitor)

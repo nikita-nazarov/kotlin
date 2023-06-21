@@ -80,20 +80,20 @@ object SMAPBuilder {
 //            }
         }
 
-    private fun List<Int>.toRanges(): List<ClosedRange<Int>> {
-        if (isEmpty()) return emptyList()
-        val numToRange = hashMapOf<Int, IntRange?>()
-        for (num in this) {
-            val range = numToRange[num - 1]
-            if (range != null) {
-                numToRange[num] = IntRange(range.start, num)
-                numToRange[num - 1] = null
-            } else {
-                numToRange[num] = IntRange(num, num)
-            }
-        }
-        return numToRange.values.filterNotNull()
-    }
+//    private fun List<Int>.toRanges(): List<ClosedRange<Int>> {
+//        if (isEmpty()) return emptyList()
+//        val numToRange = hashMapOf<Int, IntRange?>()
+//        for (num in this) {
+//            val range = numToRange[num - 1]
+//            if (range != null) {
+//                numToRange[num] = IntRange(range.start, num)
+//                numToRange[num - 1] = null
+//            } else {
+//                numToRange[num] = IntRange(num, num)
+//            }
+//        }
+//        return numToRange.values.filterNotNull()
+//    }
 
     private fun RangeMapping.toSMAP(fileId: Int, oneLine: Boolean): String =
         if (range == 1) "$source#$fileId:$dest\n" else if (oneLine) "$source#$fileId:$dest,$range\n" else "$source#$fileId,$range:$dest\n"
@@ -125,9 +125,9 @@ class SourceMapCopier(val parent: SourceMapper, private val smap: SMAP, val call
 }
 
 data class SourcePosition(val line: Int, val file: String, val path: String)
-data class ScopeMapping(var scopeNumber: Int, val lineNumbers: List<Int>)
+data class ScopeMapping(var scopeNumber: Int, val lineNumbers: MutableList<Int>)
 
-open class InlineScopeInfo(val name: String, var callerScopeId: Int, val callSiteLineNumber: Int) {
+open class InlineScopeInfo(val name: String, var callerScopeId: Int, var callSiteLineNumber: Int) {
     override fun toString(): String {
         val callerScopeIdStr = if (callerScopeId < 0) "" else callerScopeId.toString()
         return "$name/$callerScopeIdStr/$callSiteLineNumber"

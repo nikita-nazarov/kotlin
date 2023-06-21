@@ -27,7 +27,6 @@ import org.jetbrains.kotlin.ir.expressions.IrGetValue
 import org.jetbrains.kotlin.ir.expressions.IrVararg
 import org.jetbrains.kotlin.ir.util.*
 import org.jetbrains.kotlin.load.java.JavaDescriptorVisibilities
-import org.jetbrains.kotlin.load.java.JvmAbi
 import org.jetbrains.kotlin.name.JvmNames.JVM_SYNTHETIC_ANNOTATION_FQ_NAME
 import org.jetbrains.kotlin.name.JvmNames.STRICTFP_ANNOTATION_FQ_NAME
 import org.jetbrains.kotlin.name.JvmNames.SYNCHRONIZED_ANNOTATION_FQ_NAME
@@ -132,10 +131,10 @@ class FunctionCodegen(private val irFunction: IrFunction, private val classCodeg
         val functionToScopes = context.state.globalInlineContext.inlineFunctionToScopes
         val packageName = irFunction.fqNameWhenAvailable?.asString()?.substringBeforeLast(".")?.plus(".") ?: ""
         val sortedScopes = functionToScopes["$packageName$signature"].orEmpty().arranged()
-        val nameToIndex = hashMapOf<String, Int>()
+        val nameToIndex = hashMapOf<String, MutableList<Int>>()
         val lineNumberToLastScopeIdWhereItWasSeen = hashMapOf<Int, Int>()
         for ((i, scope) in sortedScopes.withIndex()) {
-            nameToIndex[scope.functionId] = i
+            nameToIndex.getOrPut(scope.functionId) { mutableListOf() }.add(i)
             for (lineNumber in scope.lineNumbers) {
                 lineNumberToLastScopeIdWhereItWasSeen[lineNumber] = i
             }
@@ -143,7 +142,11 @@ class FunctionCodegen(private val irFunction: IrFunction, private val classCodeg
 
         for ((i, scope) in sortedScopes.withIndex()) {
             val parentId = scope.parentScopeId
-            val callerScopeId = if (parentId == null) -1 else nameToIndex[parentId]!!
+            val callerScopeId = if (parentId == null) {
+                -1
+            } else {
+                nameToIndex[parentId]?.lastOrNull { it < i }!!
+            }
 
             val newLineNumbers = mutableListOf<Int>()
             for (lineNumber in scope.lineNumbers) {
@@ -157,10 +160,10 @@ class FunctionCodegen(private val irFunction: IrFunction, private val classCodeg
                 var index = callerScopeId
                 while (index != -1 && !sortedScopes[index].isInlineLambdaScope()) {
                     val parent = sortedScopes[index].parentScopeId
-                    if (parent == null) {
-                        index = -1
+                    index = if (parent == null) {
+                        -1
                     } else {
-                        index = nameToIndex[parent]!!
+                        nameToIndex[parent]?.lastOrNull { it < i }!!
                     }
                 }
                 val surroundingScopeId = index

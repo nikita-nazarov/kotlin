@@ -13,7 +13,7 @@ import org.jetbrains.kotlin.utils.threadLocal
 import java.util.*
 
 data class InlineScope(val functionId: String, val lineNumbers: List<Int>, val callSiteLineNumber: Int, val parentScopeId: String?) {
-    fun isInlineLambdaScope(): Boolean = functionId.contains("lambda")
+    fun isInlineLambdaScope(): Boolean = functionId.contains("\$lambda")
 }
 
 class GlobalInlineContext(private val diagnostics: DiagnosticSink) {
@@ -64,17 +64,22 @@ class GlobalInlineContext(private val diagnostics: DiagnosticSink) {
 }
 
 fun List<InlineScope>.arranged(): List<InlineScope> {
-    val nameToIndex = hashMapOf<String, Int>()
+    val nameToIndex = hashMapOf<String, MutableList<Int>>()
     for ((i, scope) in withIndex()) {
-        nameToIndex[scope.functionId] = i
+        nameToIndex.getOrPut(scope.functionId) { mutableListOf() }.add(i)
     }
 
     val children = Array<MutableList<Int>>(size) { mutableListOf() }
     val roots = mutableListOf<Int>()
     for ((i, scope) in withIndex()) {
-        val parent = scope.parentScopeId
-        if (parent != null) {
-            children[nameToIndex[parent]!!].add(i)
+        val parentId = scope.parentScopeId
+        if (parentId != null) {
+            val parentIndex = if (scope.isInlineLambdaScope()) {
+                nameToIndex[parentId]?.firstOrNull { it > i } // Parent scope foe inline lambdas will have larger index than lambda scope itself
+            } else {
+                nameToIndex[parentId]?.lastOrNull { it < i } // Parent scope of ordinary inline functions will have smaller index
+            }
+            children[parentIndex!!].add(i)
         } else {
             roots.add(i)
         }

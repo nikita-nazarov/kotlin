@@ -67,7 +67,6 @@ import org.jetbrains.org.objectweb.asm.commons.Method
 import org.jetbrains.org.objectweb.asm.tree.MethodNode
 import java.io.File
 import java.util.*
-import kotlin.math.max
 
 class ClassCodegen private constructor(
     val irClass: IrClass,
@@ -421,46 +420,53 @@ class ClassCodegen private constructor(
                 scope.callerScopeId += inlineScopesNum
             }
         }
-        classSMAP.inlineScopes.addAll(smap.inlineScopes)
-        classSMAP.scopeMappings.addAll(smap.scopeMappings)
 
         val node = MethodNode(Opcodes.API_VERSION, methodNode.access, methodNode.name, methodNode.desc, methodNode.signature, methodNode.exceptions.toTypedArray())
         val scopes = smap.scopeMappings
         methodNode.accept(object : MethodVisitor(Opcodes.API_VERSION, InstructionAdapter(node)) {
             var currentLineNumber = 0
+            var currentScopeNumber = -1
             val indexToLineNumbers = hashMapOf<Int, Queue<Int>>()
+            val indexToScopeNumbers = hashMapOf<Int, Queue<Int>>()
+            val lineNumberToNextScope = hashMapOf<Int, Int>()
+            val lineNumbersWaitingForScope = mutableListOf<Int>()
 
             override fun visitLineNumber(line: Int, start: Label?) {
                 currentLineNumber = line
+                currentScopeNumber = scopes.firstOrNull { it.lineNumbers.any { it == line } }?.scopeNumber ?: -1
+                if (currentScopeNumber != -1) {
+                    for (lineNumber in lineNumbersWaitingForScope) {
+                        lineNumberToNextScope[lineNumber] = currentScopeNumber
+                    }
+                    lineNumbersWaitingForScope.clear()
+                }
+                lineNumbersWaitingForScope.add(line)
                 super.visitLineNumber(line, start)
             }
 
             override fun visitVarInsn(opcode: Int, `var`: Int) {
                 indexToLineNumbers.computeIfAbsent(`var`) { LinkedList() }.add(currentLineNumber)
+                indexToScopeNumbers.computeIfAbsent(`var`) { LinkedList() }.add(currentScopeNumber)
                 super.visitVarInsn(opcode, `var`)
             }
 
             override fun visitLocalVariable(
                 name: String, descriptor: String, signature: String?, start: Label, end: Label, index: Int,
             ) {
-                val lineNumber = indexToLineNumbers[index]?.poll()
                 var newName = name
-                if (lineNumber != null &&
-                    scopes.any { it.lineNumbers.any { it == lineNumber } } &&
-                    !name.startsWith(JvmAbi.LOCAL_VARIABLE_NAME_PREFIX_INLINE_FUNCTION) &&
-                    !name.startsWith(JvmAbi.LOCAL_VARIABLE_NAME_PREFIX_INLINE_ARGUMENT))
-                {
-                    var matchingLineNumber: Int = -1
-                    var indexOfMatchingLineNumber: Int = -1
-                    for ((i, scope) in scopes.withIndex()) {
-                        val ln = scope.lineNumbers.firstOrNull() ?: continue
-                        if (ln <= lineNumber && ln > matchingLineNumber) {
-                            matchingLineNumber = ln
-                            indexOfMatchingLineNumber = i
-                        }
+                val lineNumber = indexToLineNumbers[index]?.poll()
+                val scopeNumber = indexToScopeNumbers[index]?.poll() ?: -1
+                if (name.contains("\\giveMeAScope") && lineNumber != null) {
+                    val nextScopeNumber = lineNumberToNextScope[lineNumber]
+                    if (nextScopeNumber != null) {
+                        newName = name.substringBefore("\\") + "\\${nextScopeNumber}"
                     }
-                    if (indexOfMatchingLineNumber >= 0) {
-                        newName = name.substringBefore("\\") + "\\${scopes[indexOfMatchingLineNumber].scopeNumber}"
+                } else {
+                    if (scopeNumber != -1 &&
+                        !name.startsWith(JvmAbi.LOCAL_VARIABLE_NAME_PREFIX_INLINE_FUNCTION) &&
+                        !name.startsWith(JvmAbi.LOCAL_VARIABLE_NAME_PREFIX_INLINE_ARGUMENT)
+                    ) {
+                        newName = name.substringBefore("\\") + "\\${scopeNumber}"
                     }
                 }
                 super.visitLocalVariable(newName, descriptor, signature, start, end, index)
@@ -472,9 +478,31 @@ class ClassCodegen private constructor(
         )
         val mv = with(node) { visitor.newMethod(method.descriptorOrigin, access, name, desc, signature, exceptions.toTypedArray()) }
         val smapCopier = SourceMapCopier(classSMAP, smap)
+        val callSitelineNumberToInlineScope = hashMapOf<Int, Int>()
+        val lineNumberToScopeAndIndex = hashMapOf<Int, Pair<Int, Int>>()
+        for ((i, inlineScope) in smap.inlineScopes.withIndex()) {
+            callSitelineNumberToInlineScope[inlineScope.callSiteLineNumber] = i
+        }
+
+        for ((i, scopeMapping) in smap.scopeMappings.withIndex()) {
+            for ((j, lineNumber) in scopeMapping.lineNumbers.withIndex()) {
+                lineNumberToScopeAndIndex[lineNumber] = Pair(i, j)
+            }
+        }
+
         val smapCopyingVisitor = object : MethodVisitor(Opcodes.API_VERSION, mv) {
-            override fun visitLineNumber(line: Int, start: Label) =
-                super.visitLineNumber(smapCopier.mapLineNumber(line), start)
+            override fun visitLineNumber(line: Int, start: Label) {
+                val newLineNumber = smapCopier.mapLineNumber(line)
+                if (newLineNumber != line) {
+                    callSitelineNumberToInlineScope[line]?.let {
+                        smap.inlineScopes[it].callSiteLineNumber = newLineNumber
+                    }
+                    lineNumberToScopeAndIndex[line]?.let { (scope, index) ->
+                        smap.scopeMappings[scope].lineNumbers[index] = newLineNumber
+                    }
+                }
+                super.visitLineNumber(newLineNumber, start)
+            }
         }
         if (method.hasContinuation()) {
             // Generate a state machine within this method. The continuation class for it should be generated
@@ -501,6 +529,9 @@ class ClassCodegen private constructor(
             node.accept(smapCopyingVisitor)
         }
         jvmSignatureClashDetector.trackMethod(method, RawSignature(node.name, node.desc, MemberKind.METHOD))
+
+        classSMAP.inlineScopes.addAll(smap.inlineScopes)
+        classSMAP.scopeMappings.addAll(smap.scopeMappings)
 
         when (val metadata = method.metadata) {
             is MetadataSource.Property -> metadataSerializer.bindPropertyMetadata(metadata, Method(node.name, node.desc), method.origin)
