@@ -162,23 +162,31 @@ class IrInlineCodegen(
         val originSignature = originPackageName + codegen.signature.toString()
         val originScopes = functionToScopes.getOrPut(originSignature) { mutableListOf() }
         val inlinedSignature = inlinedPackageName + jvmSignature.toString()
-        val scopes = functionToScopes[inlinedSignature]
         val old2NewLineNumbers = hashMapOf<Int, Int>()
         for ((i, j) in result.lineNumbersBeforeRemapping.zip(result.lineNumbersAfterRemapping)) {
             old2NewLineNumbers[i] = j
         }
 
-        val surroundingInlinedScope = InlineScope(
+        val surroundingInlinedScope = InlineScopeCacheEntry(
             inlinedSignature,
-            result.lineNumbersAfterRemapping,
             callSiteLineNumber,
-            null
+            parentScopeId = null,
+            result.lineNumbersAfterRemapping,
         )
         originScopes.add(surroundingInlinedScope)
-        for (scope in scopes.orEmpty()) {
-            with (scope) {
+
+        val scopes = functionToScopes[inlinedSignature].orEmpty() + result.restoredScopes
+        for (scope in scopes) {
+            with(scope) {
                 val newCallSiteLineNumber = old2NewLineNumbers[scope.callSiteLineNumber] ?: scope.callSiteLineNumber
-                originScopes.add(InlineScope(functionId, lineNumbers.mapNotNull { old2NewLineNumbers[it] }, newCallSiteLineNumber, parentScopeId ?: inlinedSignature))
+                originScopes.add(
+                    InlineScopeCacheEntry(
+                        functionId,
+                        newCallSiteLineNumber,
+                        parentScopeId ?: inlinedSignature,
+                        lineNumbers.mapNotNull { old2NewLineNumbers[it] }
+                    )
+                )
             }
         }
     }

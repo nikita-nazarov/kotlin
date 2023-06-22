@@ -331,11 +331,11 @@ class MethodInliner(
                         inliningContext.root.sourceCompilerForInline.fqName?.asString()?.substringBeforeLast(".")?.plus(".") ?: ""
                     val parentName = parentPackage + node.name + node.signature.replace("<.+>".toRegex(), "")
                     val originScopes = functionToScopes.getOrPut(methodLambdaIsInlinedToSignature) { mutableListOf() }
-                    val lambdaScope = InlineScope(
+                    val lambdaScope = InlineScopeCacheEntry(
                         lambdaInvokeMethodSignature,
-                        lambdaResult.lineNumbersAfterRemapping,
                         sourceMapper.mapLineNumber(currentLineNumber),
-                        parentName
+                        parentName,
+                        lambdaResult.lineNumbersAfterRemapping,
                     )
                     originScopes.add(lambdaScope)
                     val scopes = functionToScopes[lambdaInvokeMethodSignature]
@@ -344,11 +344,11 @@ class MethodInliner(
                             val newCallSiteLineNumber = old2NewLineNumbers[callSiteLineNumber]
                                 ?: callSiteLineNumber
                             originScopes.add(
-                                InlineScope(
+                                InlineScopeCacheEntry(
                                     functionId,
-                                    lineNumbers.mapNotNull { old2NewLineNumbers[it] },
                                     newCallSiteLineNumber,
-                                    parentScopeId ?: lambdaInvokeMethodSignature
+                                    parentScopeId ?: lambdaInvokeMethodSignature,
+                                    lineNumbers.mapNotNull { old2NewLineNumbers[it] }
                                 )
                             )
                         }

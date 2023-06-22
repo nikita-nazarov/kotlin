@@ -12,7 +12,12 @@ import org.jetbrains.kotlin.diagnostics.Errors
 import org.jetbrains.kotlin.utils.threadLocal
 import java.util.*
 
-data class InlineScope(val functionId: String, val lineNumbers: List<Int>, val callSiteLineNumber: Int, val parentScopeId: String?) {
+data class InlineScopeCacheEntry(
+    val functionId: String,
+    val callSiteLineNumber: Int,
+    var parentScopeId: String?,
+    val lineNumbers: List<Int>
+) {
     fun isInlineLambdaScope(): Boolean = functionId.contains("\$lambda")
 }
 
@@ -24,7 +29,7 @@ class GlobalInlineContext(private val diagnostics: DiagnosticSink) {
 
     private val typesUsedInInlineFunctions by threadLocal { LinkedList<MutableSet<String>>() }
 
-    val inlineFunctionToScopes: HashMap<String, MutableList<InlineScope>> = hashMapOf()
+    val inlineFunctionToScopes: HashMap<String, MutableList<InlineScopeCacheEntry>> = hashMapOf()
 
     fun enterDeclaration(descriptor: CallableDescriptor) {
         assert(descriptor.original !in inlineDeclarationSet) { "entered inlining cycle on $descriptor" }
@@ -63,7 +68,7 @@ class GlobalInlineContext(private val diagnostics: DiagnosticSink) {
     fun isTypeFromInlineFunction(type: String) = typesUsedInInlineFunctions.peek().contains(type)
 }
 
-fun List<InlineScope>.arranged(): List<InlineScope> {
+fun List<InlineScopeCacheEntry>.arranged(): List<InlineScopeCacheEntry> {
     val nameToIndex = hashMapOf<String, MutableList<Int>>()
     for ((i, scope) in withIndex()) {
         nameToIndex.getOrPut(scope.functionId) { mutableListOf() }.add(i)
@@ -104,6 +109,5 @@ fun List<InlineScope>.arranged(): List<InlineScope> {
         dfs(i)
     }
 
-    val sortedScopes = withIndex().sortedBy { (i, _) -> ids[i] }.map { it.value }
-    return sortedScopes
+    return withIndex().sortedBy { (i, _) -> ids[i] }.map { it.value }
 }

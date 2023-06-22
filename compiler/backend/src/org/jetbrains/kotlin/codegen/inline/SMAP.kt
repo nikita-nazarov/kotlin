@@ -16,7 +16,12 @@ const val KOTLIN_DEBUG_STRATA_NAME = "KotlinDebug"
 const val KOTLIN_INLINE_DEBUG_STRATA_NAME = "KotlinInlineDebug"
 
 object SMAPBuilder {
-    fun build(fileMappings: List<FileMapping>, inlineScopes: List<InlineScopeInfo>, scopeMappings: List<ScopeMapping>, backwardsCompatibleSyntax: Boolean): String? {
+    fun build(
+        fileMappings: List<FileMapping>,
+        inlineScopes: List<InlineScopeInfo>,
+        scopeMappings: List<ScopeMapping>,
+        backwardsCompatibleSyntax: Boolean
+    ): String? {
         if (fileMappings.isEmpty()) {
             return null
         }

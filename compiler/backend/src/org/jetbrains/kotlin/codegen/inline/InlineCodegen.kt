@@ -57,6 +57,7 @@ abstract class InlineCodegen<out T : BaseExpressionCodegen>(
             codegen.propagateChildReifiedTypeParametersUsages(result.reifiedTypeParametersUsages)
             codegen.markLineNumberAfterInlineIfNeeded(registerLineNumberAfterwards)
             state.factory.removeClasses(result.calcClassesToRemove())
+            fetchInlineScopeInfo(result, nodeAndSmap.classSMAP)
             return result
         } catch (e: CompilationException) {
             throw e
@@ -70,6 +71,26 @@ abstract class InlineCodegen<out T : BaseExpressionCodegen>(
                 "Couldn't inline method call: ${sourceCompiler.callElementText}\nMethod: ${nodeAndSmap?.node?.nodeText}",
                 e, sourceCompiler.callElement as? PsiElement
             )
+        }
+    }
+
+    private fun fetchInlineScopeInfo(result: InlineResult, smap: SMAP) {
+        val lineNumbersBeforeRemappingSet = result.lineNumbersBeforeRemapping.toSet()
+        if (lineNumbersBeforeRemappingSet.isNotEmpty()) {
+            for (scopeMapping in smap.scopeMappings) {
+                val inlineScope = smap.inlineScopes.getOrNull(scopeMapping.scopeNumber) ?: continue
+                val matchingLineNumbers = scopeMapping.lineNumbers.filter { it in lineNumbersBeforeRemappingSet }
+                if (matchingLineNumbers.isNotEmpty()) {
+                    result.restoredScopes.add(
+                        InlineScopeCacheEntry(
+                            inlineScope.name,
+                            inlineScope.callSiteLineNumber,
+                            parentScopeId = null, // We can't fetch the FqName of the function being inlined yet, but it will be automatically done later
+                            matchingLineNumbers
+                        )
+                    )
+                }
+            }
         }
     }
 

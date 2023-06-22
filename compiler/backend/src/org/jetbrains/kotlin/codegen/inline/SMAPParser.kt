@@ -17,6 +17,8 @@
 package org.jetbrains.kotlin.codegen.inline
 
 object SMAPParser {
+    private val INLINE_SCOPE_REGEX = "([^/]+)/(\\d+)/(\\d*)/(\\d+)(/(\\d*)/)?".toRegex()
+
     /*null smap means that there is no any debug info in file (e.g. sourceName)*/
     @JvmStatic
     fun parseOrCreateDefault(mappingInfo: String?, source: String?, path: String, methodStartLine: Int, methodEndLine: Int): SMAP {
@@ -32,8 +34,23 @@ object SMAPParser {
         return SMAP(listOf(mapping))
     }
 
-    fun parseOrNull(mappingInfo: String): SMAP? =
-        parseStratum(mappingInfo, KOTLIN_STRATA_NAME, parseStratum(mappingInfo, KOTLIN_DEBUG_STRATA_NAME, null))
+    fun parseOrNull(mappingInfo: String): SMAP? {
+        val smap = parseStratum(mappingInfo, KOTLIN_STRATA_NAME, parseStratum(mappingInfo, KOTLIN_DEBUG_STRATA_NAME, null)) ?: return null
+        val info = parseStratum(mappingInfo, KOTLIN_INLINE_DEBUG_STRATA_NAME, null) ?: return smap
+        for ((i, fileMapping) in info.fileMappings.withIndex()) {
+            val inlineScopeInfo = toInlineScopeInfo(fileMapping.name) ?: continue
+            smap.inlineScopes.add(inlineScopeInfo)
+
+            val lineNumbers = mutableListOf<Int>()
+            val scopeMapping = ScopeMapping(i, lineNumbers)
+            for (lineMapping in fileMapping.lineMappings) {
+                lineNumbers.add(lineMapping.source)
+            }
+            smap.scopeMappings.add(scopeMapping)
+        }
+
+        return smap
+    }
 
     private fun parseStratum(mappingInfo: String, stratum: String, callSites: SMAP?): SMAP? {
         val fileMappings = linkedMapOf<Int, FileMapping>()
@@ -82,5 +99,21 @@ object SMAPParser {
         }
 
         return SMAP(fileMappings.values.toList())
+    }
+
+    private fun toInlineScopeInfo(string: String): InlineScopeInfo? {
+        val matchGroups = INLINE_SCOPE_REGEX.matchEntire(string)?.groupValues ?: return null
+        if (matchGroups.size != 7) {
+            return null
+        }
+
+        val name = matchGroups[1]
+        val callerScopeId = matchGroups[3].toIntOrNull() ?: -1
+        val callSiteLineNumber = matchGroups[4].toIntOrNull() ?: 0
+        if (matchGroups[5].isNotEmpty()) {
+            val surroundingScopeId = matchGroups[6].toIntOrNull() ?: -1
+            return InlineLambdaScopeInfo(name, callerScopeId, callSiteLineNumber, surroundingScopeId)
+        }
+        return InlineScopeInfo(name, callerScopeId, callSiteLineNumber)
     }
 }
