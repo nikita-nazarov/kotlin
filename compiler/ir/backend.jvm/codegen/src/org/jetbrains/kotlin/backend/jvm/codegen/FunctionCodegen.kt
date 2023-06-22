@@ -128,6 +128,13 @@ class FunctionCodegen(private val irFunction: IrFunction, private val classCodeg
         }
         methodVisitor.visitEnd()
 
+        addInlineScopeInfo(smap)
+
+        return SMAPAndMethodNode(methodNode, smap)
+    }
+
+    private fun addInlineScopeInfo(smap: SMAP) {
+        val signature = classCodegen.methodSignatureMapper.mapSignatureWithGeneric(irFunction)
         val functionToScopes = context.state.globalInlineContext.inlineFunctionToScopes
         val packageName = irFunction.fqNameWhenAvailable?.asString()?.substringBeforeLast(".")?.plus(".") ?: ""
         val sortedScopes = functionToScopes["$packageName$signature"].orEmpty().arranged()
@@ -177,8 +184,6 @@ class FunctionCodegen(private val irFunction: IrFunction, private val classCodeg
             smap.inlineScopes.add(scopeInfo)
             smap.scopeMappings.add(ScopeMapping(smap.inlineScopes.lastIndex, newLineNumbers))
         }
-
-        return SMAPAndMethodNode(methodNode, smap)
     }
 
     private fun shouldGenerateAnnotationsOnValueParameters(): Boolean =
