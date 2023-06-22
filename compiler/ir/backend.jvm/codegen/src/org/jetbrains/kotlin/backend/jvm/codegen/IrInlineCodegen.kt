@@ -155,6 +155,12 @@ class IrInlineCodegen(
     ) {
         val callSiteLineNumber = codegen.lastLineNumber
         val result = performInline(isInsideIfCondition, function.isInlineOnly())
+        if (!function.isInlineOnly()) {
+            addInlineScopeInformationToCache(result, callSiteLineNumber)
+        }
+    }
+
+    private fun addInlineScopeInformationToCache(result: InlineResult, callSiteLineNumber: Int) {
         val functionToScopes = state.globalInlineContext.inlineFunctionToScopes
         // TODO: maybe there is a better way to extract a function package name?
         val originPackageName = codegen.irFunction.fqNameWhenAvailable?.asString()?.substringBeforeLast(".")?.plus(".") ?: ""
