@@ -327,7 +327,7 @@ class AnonymousObjectTransformer(
             inliningContext.root.inlineMethodReifier.reifyInstructions(sourceNode)
         else null
         val result = MethodInliner(
-            sourceNode,
+            SMAPAndMethodNode(sourceNode, sourceMap), // TODO: check if smap here is correct
             parameters,
             inliningContext.subInline(transformationInfo.nameGenerator),
             remapper,

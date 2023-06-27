@@ -42,7 +42,6 @@ import org.jetbrains.kotlin.ir.types.classOrNull
 import org.jetbrains.kotlin.ir.types.getArrayElementType
 import org.jetbrains.kotlin.ir.types.isArray
 import org.jetbrains.kotlin.ir.util.*
-import org.jetbrains.kotlin.load.java.JvmAbi
 import org.jetbrains.kotlin.load.java.JvmAnnotationNames
 import org.jetbrains.kotlin.load.kotlin.TypeMappingMode
 import org.jetbrains.kotlin.load.kotlin.header.KotlinClassHeader
@@ -431,8 +430,11 @@ class ClassCodegen private constructor(
             var currentLineNumber = 0
             val labelToLineNumber = mutableMapOf<Label, Int>()
             val labels = mutableListOf<Label>()
+            val lineNumbers = mutableListOf<Int>()
+            val labelToLineNumberIndex = mutableMapOf<Label, Int>()
 
             override fun visitLabel(label: Label) {
+                labelToLineNumberIndex[label] = lineNumbers.lastIndex
                 labelToLineNumber[label] = currentLineNumber
                 labels.add(label)
                 super.visitLabel(label)
@@ -440,31 +442,45 @@ class ClassCodegen private constructor(
 
             override fun visitLineNumber(line: Int, start: Label?) {
                 currentLineNumber = line
+                lineNumbers.add(line)
                 super.visitLineNumber(line, start)
             }
 
             override fun visitLocalVariable(
                 name: String, descriptor: String, signature: String?, start: Label, end: Label, index: Int,
             ) {
-                super.visitLocalVariable(assignScopeNumber(name, start), descriptor, signature, start, end, index)
+                super.visitLocalVariable(assignScopeNumber(name), descriptor, signature, start, end, index)
             }
 
-            private fun assignScopeNumber(name: String, start: Label): String {
-                val lineNumber = labelToLineNumber[start] ?: return name
-                val scopeNumber = lineNumberToScopeIndex[lineNumber]
-                if (name.contains("\\giveMeAScope")) {
-                    val nextScope = findNextScope(scopeNumber, start)
-                    if (nextScope != null) {
-                        return name.substringBefore("\\") + "\\${nextScope}"
-                    }
-                } else if (scopeNumber != null &&
-                    !name.startsWith(JvmAbi.LOCAL_VARIABLE_NAME_PREFIX_INLINE_FUNCTION) &&
-                    !name.startsWith(JvmAbi.LOCAL_VARIABLE_NAME_PREFIX_INLINE_ARGUMENT)
-                ) {
-                    return name.substringBefore("\\") + "\\${scopeNumber + offset}"
+            private fun assignScopeNumber(name: String): String {
+                println(scopes)
+                val prevScopeNum = name.substringAfter('\\').toIntOrNull()
+                if (prevScopeNum != null && offset != 0) {
+                    return "${name.substringBefore('\\')}\\${prevScopeNum + offset}"
                 }
-
                 return name
+//                if (scopes.isEmpty()) print("") // TODO: delete me
+//                if (name.startsWith(JvmAbi.LOCAL_VARIABLE_NAME_PREFIX_INLINE_FUNCTION) ||
+//                    name.startsWith(JvmAbi.LOCAL_VARIABLE_NAME_PREFIX_INLINE_ARGUMENT)
+//                ) {
+//                    return name
+//                }
+//
+//                val lineNumber = labelToLineNumber[start] ?: return name
+//                val scopeNumber = lineNumberToScopeIndex[lineNumber]
+//                val nextLineNumber = labelToLineNumberIndex[start]?.takeIf { it < lineNumbers.size - 1 }?.let { lineNumbers[it + 1] }
+//                val nextLineScopeNumber = nextLineNumber?.let { lineNumberToScopeIndex[it] }
+////                if (name.contains("\\giveMeAScope") || (scopeNumber != null && getInlineDepth(name) != inlineDepths[scopeNumber])) {
+//                if (nextLineScopeNumber != null && nextLineScopeNumber != scopeNumber) {
+//                    val nextScope = findNextScope(scopeNumber, start)
+//                    if (nextScope != null) {
+//                        return name.substringBefore("\\") + "\\${nextScope}"
+//                    }
+//                } else if (scopeNumber != null) {
+//                    return name.substringBefore("\\") + "\\${scopeNumber + offset}"
+//                }
+//
+//                return name
             }
 
             private fun findNextScope(currentScope: Int?, label: Label): Int? {

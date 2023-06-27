@@ -162,15 +162,16 @@ class IrInlineCodegen(
 
     private fun addInlineScopeInformationToSmap(result: InlineResult, callSiteLineNumber: Int) {
         val smap = codegen.smap
-        val offset = smap.inlineScopes.size
-        val parentIndex = offset + result.inlineScopes.size
+        val parentIndex = smap.inlineScopes.size
+        val offset = parentIndex + 1
         val seenLineNumbers = mutableSetOf<Int>()
+        val scopesToAdd = mutableListOf<InlineScope>()
         for (scope in result.inlineScopes) {
             seenLineNumbers.addAll(scope.lineNumbers)
             val parent = scope.callerScopeId?.let { it + offset } ?: parentIndex
             if (scope is InlineLambdaScope) {
                 val surroundingScopeId = scope.surroundingScopeId?.let { it + offset }
-                smap.inlineScopes.add(
+                scopesToAdd.add(
                     InlineLambdaScope(
                         scope.name,
                         parent,
@@ -180,7 +181,7 @@ class IrInlineCodegen(
                     )
                 )
             } else {
-                smap.inlineScopes.add(InlineScope(scope.name, parent, scope.callSiteLineNumber, scope.lineNumbers))
+                scopesToAdd.add(InlineScope(scope.name, parent, scope.callSiteLineNumber, scope.lineNumbers))
             }
         }
 
@@ -193,6 +194,7 @@ class IrInlineCodegen(
                 result.lineNumbersAfterRemapping.filter { it !in seenLineNumbers }.toMutableList()
             )
         )
+        smap.inlineScopes.addAll(scopesToAdd)
     }
 
     override fun genCycleStub(text: String, codegen: ExpressionCodegen) {

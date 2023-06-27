@@ -15,10 +15,10 @@ import org.jetbrains.kotlin.resolve.DescriptorUtils
 import org.jetbrains.kotlin.resolve.inline.InlineUtil
 import org.jetbrains.kotlin.resolve.jvm.jvmSignature.JvmMethodSignature
 import org.jetbrains.kotlin.types.KotlinType
-import org.jetbrains.org.objectweb.asm.Label
-import org.jetbrains.org.objectweb.asm.Opcodes
-import org.jetbrains.org.objectweb.asm.Type
+import org.jetbrains.org.objectweb.asm.*
 import org.jetbrains.org.objectweb.asm.tree.*
+import java.util.*
+import kotlin.collections.ArrayList
 import kotlin.math.max
 
 abstract class InlineCodegen<out T : BaseExpressionCodegen>(
@@ -57,7 +57,6 @@ abstract class InlineCodegen<out T : BaseExpressionCodegen>(
             codegen.propagateChildReifiedTypeParametersUsages(result.reifiedTypeParametersUsages)
             codegen.markLineNumberAfterInlineIfNeeded(registerLineNumberAfterwards)
             state.factory.removeClasses(result.calcClassesToRemove())
-            result.addInlineScopeInfo(nodeAndSmap.classSMAP)
             return result
         } catch (e: CompilationException) {
             throw e
@@ -110,7 +109,7 @@ abstract class InlineCodegen<out T : BaseExpressionCodegen>(
         val sourceInfo = sourceMapper.sourceInfo!!
         val callSite = SourcePosition(codegen.lastLineNumber, sourceInfo.sourceFileName!!, sourceInfo.pathOrCleanFQN)
         val inliner = MethodInliner(
-            node, parameters, info, FieldRemapper(null, null, parameters),
+            nodeAndSmap, parameters, info, FieldRemapper(null, null, parameters),
             sourceCompiler.isCallInsideSameModuleAsCallee, "Method inlining " + sourceCompiler.callElementText,
             SourceMapCopier(sourceMapper, nodeAndSmap.classSMAP, callSite),
             info.callSiteInfo, isInlineOnly,

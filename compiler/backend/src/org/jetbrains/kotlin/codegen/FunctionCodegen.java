@@ -9,7 +9,6 @@ import com.intellij.openapi.progress.ProcessCanceledException;
 import com.intellij.psi.PsiElement;
 import com.intellij.util.ArrayUtil;
 import kotlin.collections.CollectionsKt;
-import kotlin.text.StringsKt;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.kotlin.backend.common.CodegenUtil;
@@ -29,7 +28,6 @@ import org.jetbrains.kotlin.descriptors.*;
 import org.jetbrains.kotlin.descriptors.annotations.AnnotationDescriptor;
 import org.jetbrains.kotlin.descriptors.impl.AnonymousFunctionDescriptor;
 import org.jetbrains.kotlin.load.java.BuiltinMethodsWithSpecialGenericSignature;
-import org.jetbrains.kotlin.load.java.JvmAbi;
 import org.jetbrains.kotlin.load.java.SpecialBuiltinMembers;
 import org.jetbrains.kotlin.load.java.descriptors.JavaClassDescriptor;
 import org.jetbrains.kotlin.psi.*;
@@ -653,34 +651,34 @@ public class FunctionCodegen {
                 (functionFakeIndex >= 0 ? 1 : 0)
         );
 
-        //TODO: it's best to move all below logic to 'generateLocalVariableTable' method
-        if (context.isInlineMethodContext() && functionFakeIndex != -1) {
-            assert methodEntry != null : "methodEntry is not initialized";
-            mv.visitLocalVariable(
-                    JvmAbi.LOCAL_VARIABLE_NAME_PREFIX_INLINE_FUNCTION + typeMapper.mapAsmMethod(functionDescriptor).getName(),
-                    Type.INT_TYPE.getDescriptor(), null,
-                    methodEntry, methodEnd,
-                    functionFakeIndex);
-        } else if (context instanceof InlineLambdaContext && thisType != null && functionFakeIndex != -1) {
-            String internalName = thisType.getInternalName();
-            String lambdaLocalName = StringsKt.substringAfterLast(internalName, '/', internalName);
-
-            KtPureElement functionArgument = parentCodegen.element;
-            String functionName = "unknown";
-            if (functionArgument instanceof KtFunction) {
-                ValueParameterDescriptor inlineArgumentDescriptor =
-                        InlineUtil.getInlineArgumentDescriptor((KtFunction) functionArgument, parentCodegen.bindingContext);
-                if (inlineArgumentDescriptor != null) {
-                    functionName = inlineArgumentDescriptor.getContainingDeclaration().getName().asString();
-                }
-            }
-            assert methodEntry != null : "methodEntry is not initialized";
-            mv.visitLocalVariable(
-                    JvmAbi.LOCAL_VARIABLE_NAME_PREFIX_INLINE_ARGUMENT + "-" + functionName + "-" + lambdaLocalName,
-                    Type.INT_TYPE.getDescriptor(), null,
-                    methodEntry, methodEnd,
-                    functionFakeIndex);
-        }
+        ////TODO: it's best to move all below logic to 'generateLocalVariableTable' method
+        //if (context.isInlineMethodContext() && functionFakeIndex != -1) {
+        //    assert methodEntry != null : "methodEntry is not initialized";
+        //    mv.visitLocalVariable(
+        //            JvmAbi.LOCAL_VARIABLE_NAME_PREFIX_INLINE_FUNCTION + typeMapper.mapAsmMethod(functionDescriptor).getName(),
+        //            Type.INT_TYPE.getDescriptor(), null,
+        //            methodEntry, methodEnd,
+        //            functionFakeIndex);
+        //} else if (context instanceof InlineLambdaContext && thisType != null && functionFakeIndex != -1) {
+        //    String internalName = thisType.getInternalName();
+        //    String lambdaLocalName = StringsKt.substringAfterLast(internalName, '/', internalName);
+        //
+        //    KtPureElement functionArgument = parentCodegen.element;
+        //    String functionName = "unknown";
+        //    if (functionArgument instanceof KtFunction) {
+        //        ValueParameterDescriptor inlineArgumentDescriptor =
+        //                InlineUtil.getInlineArgumentDescriptor((KtFunction) functionArgument, parentCodegen.bindingContext);
+        //        if (inlineArgumentDescriptor != null) {
+        //            functionName = inlineArgumentDescriptor.getContainingDeclaration().getName().asString();
+        //        }
+        //    }
+        //    assert methodEntry != null : "methodEntry is not initialized";
+        //    mv.visitLocalVariable(
+        //            JvmAbi.LOCAL_VARIABLE_NAME_PREFIX_INLINE_ARGUMENT + "-" + functionName + "-" + lambdaLocalName,
+        //            Type.INT_TYPE.getDescriptor(), null,
+        //            methodEntry, methodEnd,
+        //            functionFakeIndex);
+        //}
     }
 
     private static boolean isLambdaPassedToInlineOnly(KtFunction lambda, BindingContext bindingContext) {

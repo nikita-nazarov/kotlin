@@ -39,7 +39,7 @@ import java.util.*
 import kotlin.math.max
 
 class MethodInliner(
-    private val node: MethodNode,
+    private val nodeAndSmap: SMAPAndMethodNode,
     private val parameters: Parameters,
     private val inliningContext: InliningContext,
     private val nodeRemapper: FieldRemapper,
@@ -90,7 +90,7 @@ class MethodInliner(
         finallyDeepShift: Int,
     ): InlineResult {
         //analyze body
-        var transformedNode = markPlacesForInlineAndRemoveInlinable(node, returnLabels, finallyDeepShift)
+        var transformedNode = markPlacesForInlineAndRemoveInlinable(nodeAndSmap.node, returnLabels, finallyDeepShift)
 
         //substitute returns with "goto end" instruction to keep non local returns in lambdas
         val end = linkedLabel()
@@ -157,6 +157,7 @@ class MethodInliner(
         val fakeContinuationName = CoroutineTransformer.findFakeContinuationConstructorClassName(node)
         val markerShift = calcMarkerShift(parameters, node)
         var currentLineNumber = if (overrideLineNumber) sourceMapper.callSite!!.line else -1
+        val lambdaScopes = mutableListOf<InlineScope>()
         val lambdaInliner = object : InlineAdapter(remappingMethodAdapter, parameters.argsSizeOnStack, sourceMapper) {
             private var transformationInfo: TransformationInfo? = null
 
@@ -300,7 +301,7 @@ class MethodInliner(
 
                     val callSite = sourceMapper.callSite.takeIf { info is DefaultLambda }
                     val inliner = MethodInliner(
-                        info.node.node, lambdaParameters, inliningContext.subInlineLambda(info),
+                        info.node, lambdaParameters, inliningContext.subInlineLambda(info),
                         newCapturedRemapper,
                         if (info is DefaultLambda) isSameModule else true /*cause all nested objects in same module as lambda*/,
                         "Lambda inlining " + info.lambdaClassType.internalName,
@@ -312,17 +313,19 @@ class MethodInliner(
                     //TODO add skipped this and receiver
                     val lambdaResult =
                         inliner.doInline(localVariablesSorter, varRemapper, true, info.returnLabels, invokeCall.finallyDepthShift)
-                    lambdaResult.addInlineScopeInfo(info.node.classSMAP)
+
+                    inliningContext.inlinedScopes += inliner.inliningContext.inlinedScopes
 
                     val seenLineNumbers = mutableSetOf<Int>()
-                    val offset = result.inlineScopes.size
-                    val parentIndex = offset + lambdaResult.inlineScopes.size
+                    val parentIndex = lambdaScopes.size
+                    val offset = parentIndex + 1
+                    val scopesToAdd = mutableListOf<InlineScope>()
                     for (scope in lambdaResult.inlineScopes) {
                         seenLineNumbers.addAll(scope.lineNumbers)
                         val parent = scope.callerScopeId?.let { it + offset } ?: parentIndex
                         if (scope is InlineLambdaScope) {
                             val surroundingScopeId = scope.surroundingScopeId?.let { it + offset } ?: parentIndex
-                            result.inlineScopes.add(
+                            scopesToAdd.add(
                                 InlineLambdaScope(
                                     scope.name,
                                     parent,
@@ -332,12 +335,12 @@ class MethodInliner(
                                 )
                             )
                         } else {
-                            result.inlineScopes.add(InlineScope(scope.name, parent, scope.callSiteLineNumber, scope.lineNumbers))
+                            scopesToAdd.add(InlineScope(scope.name, parent, scope.callSiteLineNumber, scope.lineNumbers))
                         }
                     }
 
                     val lambdaInvokeMethodSignature = info.invokeMethod.toString().substringBefore('(')
-                    result.inlineScopes.add(
+                    lambdaScopes.add(
                         InlineLambdaScope(
                             lambdaInvokeMethodSignature,
                             callerScopeId = null,
@@ -346,6 +349,7 @@ class MethodInliner(
                             lambdaResult.lineNumbersAfterRemapping.filter { it !in seenLineNumbers }.toMutableList(),
                         )
                     )
+                    lambdaScopes.addAll(scopesToAdd)
 
                     result.mergeWithNotChangeInfo(lambdaResult)
                     result.reifiedTypeParametersUsages.mergeAll(lambdaResult.reifiedTypeParametersUsages)
@@ -427,6 +431,27 @@ class MethodInliner(
         node.accept(lambdaInliner)
 
         surroundInvokesWithSuspendMarkersIfNeeded(resultNode)
+
+        result.addInlineScopeInfo(nodeAndSmap)
+        val offset = result.inlineScopes.size
+        for (scope in lambdaScopes) {
+            val parent = scope.callerScopeId?.let { it + offset }
+            if (scope is InlineLambdaScope) {
+                val surroundingScopeId = scope.surroundingScopeId?.let { it + offset }
+                result.inlineScopes.add(
+                    InlineLambdaScope(
+                        scope.name,
+                        parent,
+                        scope.callSiteLineNumber,
+                        surroundingScopeId,
+                        scope.lineNumbers
+                    )
+                )
+            } else {
+                result.inlineScopes.add(InlineScope(scope.name, parent, scope.callSiteLineNumber, scope.lineNumbers))
+            }
+        }
+
         return resultNode
     }
 
@@ -455,9 +480,59 @@ class MethodInliner(
             node.signature, node.exceptions?.toTypedArray()
         )
 
-        val transformationVisitor = object : InlineMethodInstructionAdapter(transformedNode) {
-            var firstLabel: Label? = null
+        val localVariables = node.localVariables
+        if (localVariables.isNotEmpty()) {
+            val renamer =
+                if (!inliningContext.isInliningLambda && node.localVariables.any { isFakeLocalVariableForInline(it.name) }) {
+                    InlineMarkerVariableRenamer()
+                } else {
+                    InlineScopeNumbersRenamer()
+                }
+            val parentInlineScopesNum = sourceMapper.parent.inlineScopes.size + (inliningContext.parent?.inlinedScopes ?: 0)
+            renamer.renameVariables(node, parentInlineScopesNum)
+            inliningContext.inlinedScopes = renamer.inlineScopesNum
+        }
 
+//        val inlineScopesSet = mutableSetOf<Int>()
+//        val inlineMarkerVariablesBorders = mutableListOf<Pair<Int, Int>>()
+//        node.accept(object : MethodVisitor(Opcodes.API_VERSION) {
+//            private val labelToIndex = mutableMapOf<Label, Int>()
+//            private var currentLabelIndex = 0
+//
+//            override fun visitLabel(label: Label?) {
+//                if (label != null) {
+//                    labelToIndex[label] = currentLabelIndex
+//                    currentLabelIndex += 1
+//                }
+//                super.visitLabel(label)
+//            }
+//
+//            override fun visitLocalVariable(name: String, descriptor: String, signature: String?, start: Label, end: Label, index: Int) { super.visitLocalVariable(name, descriptor, signature, start, end, index); /* TODO: figure out if we really need to strip the name here */ val strippedName = name.replace("\$iv", "")
+//                val scopeNumber = strippedName.substringAfter('\\').toIntOrNull()
+//                if (scopeNumber != null) {
+//                    inlineScopesSet.add(scopeNumber)
+//                }
+//
+//                if (name.startsWith(JvmAbi.LOCAL_VARIABLE_NAME_PREFIX_INLINE_FUNCTION) ||
+//                    name.startsWith(JvmAbi.LOCAL_VARIABLE_NAME_PREFIX_INLINE_ARGUMENT)
+//                ) {
+//                    val startIndex = labelToIndex[start] ?: return
+//                    val endIndex = labelToIndex[end] ?: return
+//                    inlineMarkerVariablesBorders.add(Pair(startIndex, endIndex))
+//                }
+//            }
+//        })
+//
+//        inlineMarkerVariablesBorders.sortBy { it.first }
+//
+//        val inlineScopesNum = inlineScopesSet.size
+//        val parentInliningContext = inliningContext.parent
+//        val parentInlineScopesNum = sourceMapper.parent.inlineScopes.size + (parentInliningContext?.inlinedScopes ?: 0)
+//        println()
+        val transformationVisitor = object : InlineMethodInstructionAdapter(transformedNode) {
+//            private val labelToIndex = mutableMapOf<Label, Int>()
+//            private var currentLabelIndex = 0
+//
             private val GENERATE_DEBUG_INFO = GENERATE_SMAP && !overrideLineNumber
 
             private val isInliningLambda = nodeRemapper.isInsideInliningLambda
@@ -521,28 +596,71 @@ class MethodInliner(
                 }
             }
 
-            override fun visitLabel(label: Label) {
-                if (firstLabel == null) {
-                    firstLabel = label
-                }
-                super.visitLabel(label)
-            }
-
-            override fun visitLocalVariable(
-                name: String, descriptor: String, signature: String?, start: Label, end: Label, index: Int,
-            ) {
-                var newName = name
-                // Start labels of method arguments is equal to the first label in this method.
-                // We assign a fake name to every function argument to distinguish them from
-                // ordinary variables when the method is inlined.
-                if (start == firstLabel) {
-                    newName = "$name\\giveMeAScope"
-                }
-                super.visitLocalVariable(newName, descriptor, signature, start, end, index)
-            }
+//            override fun visitLabel(label: Label?) {
+//                if (label != null) {
+//                    labelToIndex[label] = currentLabelIndex
+//                    currentLabelIndex += 1
+//                }
+//                super.visitLabel(label)
+//            }
+//
+//            override fun visitLocalVariable(name: String, descriptor: String, signature: String?, start: Label, end: Label, index: Int) {
+//                // TODO: figure out if we really need to strip the name here
+//                val strippedName = name.replace("\$iv", "")
+//                val newScopeNumber = if (inlineMarkerVariablesBorders.isNotEmpty()) {
+//                    getScopeNumberFromMarkerVariables(name, start)
+//                } else {
+//                    getScopeNumberFromPreviousScopeNumber(strippedName)
+//                }
+//
+//                if (newScopeNumber != null) {
+//                    super.visitLocalVariable(
+//                        "${strippedName.substringBefore('\\')}\\${parentInlineScopesNum + newScopeNumber}",
+//                        descriptor,
+//                        signature,
+//                        start,
+//                        end,
+//                        index
+//                    )
+//                } else {
+//                    super.visitLocalVariable(name, descriptor, signature, start, end, index)
+//                }
+//            }
+//
+//            private fun getScopeNumberFromPreviousScopeNumber(name: String): Int {
+//                val scopeNumber = name.substringAfter('\\').toIntOrNull()
+//                return if (scopeNumber == null) {
+//                    0
+//                } else {
+//                    1 + if (inlineScopesNum != 0) scopeNumber % inlineScopesNum else scopeNumber
+//                }
+//            }
+//
+//            private fun getScopeNumberFromMarkerVariables(name: String, start: Label): Int? {
+//                val startIndex = labelToIndex[start] ?: return null
+//                var numOfBordersThatContainVariable = 0
+//                var indexOfLastBorder: Int? = null
+//                for ((i, border) in inlineMarkerVariablesBorders.withIndex()) {
+//                    if (startIndex >= border.first && startIndex <= border.second) {
+//                        numOfBordersThatContainVariable += 1
+//                        indexOfLastBorder = i
+//                    }
+//                }
+//
+//                if (!isFakeLocalVariableForInline(name)) {
+//                    return (indexOfLastBorder ?: 0) + 1
+//                }
+//                return indexOfLastBorder
+//            }
         }
 
         node.accept(transformationVisitor)
+
+//        inliningContext.inlinedScopes =
+//            if (inlineMarkerVariablesBorders.isEmpty())
+//                inlineScopesNum + 1
+//            else
+//                inlineMarkerVariablesBorders.size
 
         transformCaptured(transformedNode)
         transformFinallyDeepIndex(transformedNode, finallyDeepShift)
