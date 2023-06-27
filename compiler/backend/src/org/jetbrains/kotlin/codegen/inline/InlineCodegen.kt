@@ -11,14 +11,15 @@ import org.jetbrains.kotlin.codegen.AsmUtil.isPrimitive
 import org.jetbrains.kotlin.codegen.state.GenerationState
 import org.jetbrains.kotlin.descriptors.PackageFragmentDescriptor
 import org.jetbrains.kotlin.descriptors.ParameterDescriptor
+import org.jetbrains.kotlin.load.java.JvmAbi
 import org.jetbrains.kotlin.resolve.DescriptorUtils
 import org.jetbrains.kotlin.resolve.inline.InlineUtil
 import org.jetbrains.kotlin.resolve.jvm.jvmSignature.JvmMethodSignature
 import org.jetbrains.kotlin.types.KotlinType
-import org.jetbrains.org.objectweb.asm.Label
-import org.jetbrains.org.objectweb.asm.Opcodes
-import org.jetbrains.org.objectweb.asm.Type
+import org.jetbrains.org.objectweb.asm.*
 import org.jetbrains.org.objectweb.asm.tree.*
+import java.util.*
+import kotlin.collections.ArrayList
 import kotlin.math.max
 
 abstract class InlineCodegen<out T : BaseExpressionCodegen>(
@@ -57,7 +58,10 @@ abstract class InlineCodegen<out T : BaseExpressionCodegen>(
             codegen.propagateChildReifiedTypeParametersUsages(result.reifiedTypeParametersUsages)
             codegen.markLineNumberAfterInlineIfNeeded(registerLineNumberAfterwards)
             state.factory.removeClasses(result.calcClassesToRemove())
-            fetchInlineScopeInfo(result, nodeAndSmap.classSMAP)
+            fetchInlineScopeInfoFromSmap(result, nodeAndSmap.classSMAP)
+            if (result.restoredInlineScopes.isEmpty()) {
+                fetchInlineScopeInfoFromMarkerVariables(result, nodeAndSmap)
+            }
             return result
         } catch (e: CompilationException) {
             throw e
@@ -74,14 +78,14 @@ abstract class InlineCodegen<out T : BaseExpressionCodegen>(
         }
     }
 
-    private fun fetchInlineScopeInfo(result: InlineResult, smap: SMAP) {
+    private fun fetchInlineScopeInfoFromSmap(result: InlineResult, smap: SMAP) {
         val lineNumbersBeforeRemappingSet = result.lineNumbersBeforeRemapping.toSet()
         if (lineNumbersBeforeRemappingSet.isNotEmpty()) {
             for (scopeMapping in smap.scopeMappings) {
                 val inlineScope = smap.inlineScopes.getOrNull(scopeMapping.scopeNumber) ?: continue
                 val matchingLineNumbers = scopeMapping.lineNumbers.filter { it in lineNumbersBeforeRemappingSet }
                 if (matchingLineNumbers.isNotEmpty()) {
-                    result.restoredScopes.add(
+                    result.restoredInlineScopes.add(
                         InlineScopeCacheEntry(
                             inlineScope.name,
                             inlineScope.callSiteLineNumber,
@@ -90,6 +94,122 @@ abstract class InlineCodegen<out T : BaseExpressionCodegen>(
                         )
                     )
                 }
+            }
+        }
+    }
+
+    private fun fetchInlineScopeInfoFromMarkerVariables(result: InlineResult, nodeAndSmap: SMAPAndMethodNode) {
+        data class ScopeInfo(val lineNumbers: List<Int>, val callSiteLineNumber: Int?)
+
+        val scopeVariableToInfo = hashMapOf<String, ScopeInfo>()
+        nodeAndSmap.node.accept(object : MethodVisitor(Opcodes.API_VERSION) {
+            var currentLineNumber = 0
+            val labelToLineNumber = hashMapOf<Label, Int>()
+            val visitedLineNumbers = mutableListOf<Int>()
+            val indexToLineNumbers = hashMapOf<Int, Queue<Int>>()
+
+            override fun visitVarInsn(opcode: Int, `var`: Int) {
+                indexToLineNumbers.computeIfAbsent(`var`) { LinkedList() }.add(currentLineNumber)
+                super.visitVarInsn(opcode, `var`)
+            }
+
+            override fun visitLineNumber(line: Int, start: Label?) {
+                currentLineNumber = line
+                if (start != null) {
+                    labelToLineNumber[start] = line
+                }
+                visitedLineNumbers.add(line)
+                super.visitLineNumber(line, start)
+            }
+
+            override fun visitLocalVariable(
+                name: String?,
+                descriptor: String?,
+                signature: String?,
+                start: Label?,
+                end: Label?,
+                index: Int,
+            ) {
+                val introductionLine = indexToLineNumbers[index]?.poll()
+                super.visitLocalVariable(name, descriptor, signature, start, end, index)
+                if (name == null || start == null || end == null) {
+                    return
+                }
+
+                if (name.startsWith(JvmAbi.LOCAL_VARIABLE_NAME_PREFIX_INLINE_FUNCTION) ||
+                    name.startsWith(JvmAbi.LOCAL_VARIABLE_NAME_PREFIX_INLINE_ARGUMENT)
+                ) {
+                    var seenStart = false
+                    val lineNumbers = mutableListOf<Int>()
+                    val endLineNumber = labelToLineNumber[end]
+                    val startLineNumber = labelToLineNumber[start]
+                    for (lineNumber in visitedLineNumbers) {
+                        if (lineNumber == endLineNumber) {
+                            break
+                        }
+
+                        if (lineNumber == startLineNumber) {
+                            seenStart = true
+                        }
+
+                        if (seenStart) {
+                            lineNumbers.add(lineNumber)
+                        }
+                    }
+                    scopeVariableToInfo[name] = ScopeInfo(lineNumbers, introductionLine)
+                }
+            }
+        })
+
+        for ((scopeVariableName, info) in scopeVariableToInfo) {
+            val (lines, callSiteLineNumber) = info
+            if (lines.isEmpty()) continue
+            val firstLine = lines.first()
+            val rangeMapping = nodeAndSmap.classSMAP.findRange(firstLine) ?: continue
+
+            val classBytes = loadClassBytesByInternalName(sourceCompiler.state, rangeMapping.parent.path)
+            if (classBytes.isEmpty()) continue
+
+            val lineNumberToFind = rangeMapping.mapDestToSource(firstLine).line
+            var functionId: String? = null
+            ClassReader(classBytes).accept(object : ClassVisitor(Opcodes.API_VERSION) {
+                override fun visitMethod(
+                    access: Int,
+                    name: String?,
+                    descriptor: String?,
+                    signature: String?,
+                    exceptions: Array<out String>?,
+                ): MethodVisitor? {
+                    if (name == scopeVariableName.substringAfter(JvmAbi.LOCAL_VARIABLE_NAME_PREFIX_INLINE_FUNCTION)) {
+                        return object : MethodVisitor(Opcodes.API_VERSION) {
+                            override fun visitLineNumber(line: Int, start: Label?) {
+                                if (functionId != null) return
+                                if (line == lineNumberToFind) {
+                                    val packagePath = rangeMapping.parent.path.replace('/', '.')
+                                    val packageName = if (packagePath.isEmpty()) {
+                                        ""
+                                    } else {
+                                        "$packagePath."
+                                    }
+                                    functionId = packageName + name + descriptor
+                                }
+                                super.visitLineNumber(line, start)
+                            }
+                        }
+                    }
+                    return super.visitMethod(access, name, descriptor, signature, exceptions)
+                }
+            }, ClassReader.SKIP_FRAMES)
+
+            if (functionId != null) {
+                result.restoredInlineScopes.add(
+                    InlineScopeCacheEntry(
+                        functionId!!,
+                        callSiteLineNumber ?: -1,
+                        parentScopeId = null,
+                        lines
+                    )
+                )
             }
         }
     }
@@ -175,7 +295,7 @@ abstract class InlineCodegen<out T : BaseExpressionCodegen>(
     private fun generateAndInsertFinallyBlocks(
         intoNode: MethodNode,
         insertPoints: List<MethodInliner.PointForExternalFinallyBlocks>,
-        offsetForFinallyLocalVar: Int
+        offsetForFinallyLocalVar: Int,
     ) {
         if (!sourceCompiler.hasFinallyBlocks()) return
 

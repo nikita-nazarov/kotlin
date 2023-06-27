@@ -27,7 +27,7 @@ class InlineResult private constructor() {
     val reifiedTypeParametersUsages = ReifiedTypeParametersUsages()
     val lineNumbersBeforeRemapping = mutableListOf<Int>()
     val lineNumbersAfterRemapping = mutableListOf<Int>()
-    val restoredScopes = mutableListOf<InlineScopeCacheEntry>()
+    val restoredInlineScopes = mutableListOf<InlineScopeCacheEntry>()
 
     fun merge(child: InlineResult) {
         classesToRemove.addAll(child.calcClassesToRemove())

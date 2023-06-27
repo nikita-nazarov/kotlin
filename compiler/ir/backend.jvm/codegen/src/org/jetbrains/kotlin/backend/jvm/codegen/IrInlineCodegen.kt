@@ -181,7 +181,7 @@ class IrInlineCodegen(
         )
         originScopes.add(surroundingInlinedScope)
 
-        val scopes = functionToScopes[inlinedSignature].orEmpty() + result.restoredScopes
+        val scopes = functionToScopes[inlinedSignature] ?: result.restoredInlineScopes
         for (scope in scopes) {
             with(scope) {
                 val newCallSiteLineNumber = old2NewLineNumbers[scope.callSiteLineNumber] ?: scope.callSiteLineNumber
