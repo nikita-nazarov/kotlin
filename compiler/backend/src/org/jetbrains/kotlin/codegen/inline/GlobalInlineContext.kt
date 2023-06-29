@@ -12,15 +12,6 @@ import org.jetbrains.kotlin.diagnostics.Errors
 import org.jetbrains.kotlin.utils.threadLocal
 import java.util.*
 
-data class InlineScopeCacheEntry(
-    val functionId: String,
-    val callSiteLineNumber: Int,
-    var parentScopeId: String?,
-    val lineNumbers: List<Int>
-) {
-    fun isInlineLambdaScope(): Boolean = functionId.contains("\$lambda")
-}
-
 class GlobalInlineContext(private val diagnostics: DiagnosticSink) {
     // Ordered set of declarations and inline calls being generated right now.
     // No call in it should point to a declaration that's before it in the stack.
@@ -28,8 +19,6 @@ class GlobalInlineContext(private val diagnostics: DiagnosticSink) {
     private val inlineDeclarationSet by threadLocal { mutableSetOf<CallableDescriptor>() }
 
     private val typesUsedInInlineFunctions by threadLocal { LinkedList<MutableSet<String>>() }
-
-    val inlineFunctionToScopes: HashMap<String, MutableList<InlineScopeCacheEntry>> = hashMapOf()
 
     fun enterDeclaration(descriptor: CallableDescriptor) {
         assert(descriptor.original !in inlineDeclarationSet) { "entered inlining cycle on $descriptor" }
@@ -66,48 +55,4 @@ class GlobalInlineContext(private val diagnostics: DiagnosticSink) {
     fun recordTypeFromInlineFunction(type: String) = typesUsedInInlineFunctions.peek().add(type)
 
     fun isTypeFromInlineFunction(type: String) = typesUsedInInlineFunctions.peek().contains(type)
-}
-
-fun List<InlineScopeCacheEntry>.arranged(): List<InlineScopeCacheEntry> {
-    val nameToIndex = hashMapOf<String, MutableList<Int>>()
-    for ((i, scope) in withIndex()) {
-        nameToIndex.getOrPut(scope.functionId) { mutableListOf() }.add(i)
-    }
-
-    val children = Array<MutableList<Int>>(size) { mutableListOf() }
-    val roots = mutableListOf<Int>()
-    for ((i, scope) in withIndex()) {
-        val parentId = scope.parentScopeId
-        if (parentId != null) {
-            val parentIndex = if (scope.isInlineLambdaScope()) {
-                nameToIndex[parentId]?.firstOrNull { it > i } // Parent scope foe inline lambdas will have larger index than lambda scope itself
-            } else {
-                nameToIndex[parentId]?.lastOrNull { it < i } // Parent scope of ordinary inline functions will have smaller index
-            }
-            children[parentIndex!!].add(i)
-        } else {
-            roots.add(i)
-        }
-    }
-
-    val ids = Array<Int>(size) { 0 }
-    val visited = Array<Boolean>(size) { false }
-    var currentId = 0
-    fun dfs(v: Int) {
-        ids[v] = currentId
-        visited[v] = true
-        currentId += 1
-
-        for (child in children[v]) {
-            if (!visited[child]) {
-                dfs(child)
-            }
-        }
-    }
-
-    for (i in roots) {
-        dfs(i)
-    }
-
-    return withIndex().sortedBy { (i, _) -> ids[i] }.map { it.value }
 }

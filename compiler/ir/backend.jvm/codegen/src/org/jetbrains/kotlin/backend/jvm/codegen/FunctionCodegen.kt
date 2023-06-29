@@ -124,66 +124,14 @@ class FunctionCodegen(private val irFunction: IrFunction, private val classCodeg
                 context.state.globalInlineContext.exitDeclaration()
             }
             methodVisitor.visitMaxs(-1, -1)
-            SMAP(sourceMapper.resultMappings)
+            val result = SMAP(sourceMapper.resultMappings)
+            result.inlineScopes.addAll(sourceMapper.inlineScopes)
+            result.scopeMappings.addAll(sourceMapper.scopeMappings)
+            result
         }
         methodVisitor.visitEnd()
 
-        addInlineScopeInfo(smap)
-
         return SMAPAndMethodNode(methodNode, smap)
-    }
-
-    private fun addInlineScopeInfo(smap: SMAP) {
-        val signature = classCodegen.methodSignatureMapper.mapSignatureWithGeneric(irFunction)
-        val functionToScopes = context.state.globalInlineContext.inlineFunctionToScopes
-        val packageName = irFunction.fqNameWhenAvailable?.asString()?.substringBeforeLast(".")?.plus(".") ?: ""
-        val sortedScopes = functionToScopes["$packageName$signature"].orEmpty().arranged()
-        val nameToIndex = hashMapOf<String, MutableList<Int>>()
-        val lineNumberToLastScopeIdWhereItWasSeen = hashMapOf<Int, Int>()
-        for ((i, scope) in sortedScopes.withIndex()) {
-            nameToIndex.getOrPut(scope.functionId) { mutableListOf() }.add(i)
-            for (lineNumber in scope.lineNumbers) {
-                lineNumberToLastScopeIdWhereItWasSeen[lineNumber] = i
-            }
-        }
-
-        for ((i, scope) in sortedScopes.withIndex()) {
-            val parentId = scope.parentScopeId
-            val callerScopeId = if (parentId == null) {
-                -1
-            } else {
-                nameToIndex[parentId]?.lastOrNull { it < i }!!
-            }
-
-            val newLineNumbers = mutableListOf<Int>()
-            for (lineNumber in scope.lineNumbers) {
-                val lastScopeId = lineNumberToLastScopeIdWhereItWasSeen[lineNumber]
-                if (lastScopeId == i) {
-                    newLineNumbers.add(lineNumber)
-                }
-            }
-
-            val scopeInfo = if (scope.isInlineLambdaScope()) {
-                var index = callerScopeId
-                while (index != -1 && !sortedScopes[index].isInlineLambdaScope()) {
-                    val parent = sortedScopes[index].parentScopeId
-                    index = if (parent == null) {
-                        -1
-                    } else {
-                        nameToIndex[parent]?.lastOrNull { it < i }!!
-                    }
-                }
-                val surroundingScopeId = index
-                val parentFunctionName = smap.inlineScopes[callerScopeId].name
-                val originalFunctionName = scope.functionId.substringBefore("$")
-                InlineLambdaScopeInfo("lambda '$parentFunctionName' in '$originalFunctionName'", callerScopeId, scope.callSiteLineNumber, surroundingScopeId)
-            } else {
-                InlineScopeInfo(scope.functionId.substringBefore("("), callerScopeId, scope.callSiteLineNumber)
-            }
-
-            smap.inlineScopes.add(scopeInfo)
-            smap.scopeMappings.add(ScopeMapping(smap.inlineScopes.lastIndex, newLineNumbers))
-        }
     }
 
     private fun shouldGenerateAnnotationsOnValueParameters(): Boolean =

@@ -22,7 +22,6 @@ import org.jetbrains.kotlin.config.LanguageFeature
 import org.jetbrains.kotlin.load.java.JvmAbi
 import org.jetbrains.kotlin.resolve.jvm.AsmTypes
 import org.jetbrains.kotlin.resolve.jvm.AsmTypes.OBJECT_TYPE
-import org.jetbrains.kotlin.resolve.jvm.jvmSignature.JvmMethodSignature
 import org.jetbrains.kotlin.utils.SmartList
 import org.jetbrains.kotlin.utils.SmartSet
 import org.jetbrains.org.objectweb.asm.Label
@@ -48,8 +47,6 @@ class MethodInliner(
     private val errorPrefix: String,
     private val sourceMapper: SourceMapCopier,
     private val inlineCallSiteInfo: InlineCallSiteInfo,
-    private val globalInlineContext: GlobalInlineContext,
-    private val parentSignature: JvmMethodSignature? = null,
     private val overrideLineNumber: Boolean = false,
     private val shouldPreprocessApiVersionCalls: Boolean = false,
     private val defaultMaskStart: Int = -1,
@@ -308,51 +305,59 @@ class MethodInliner(
                         if (info is DefaultLambda) isSameModule else true /*cause all nested objects in same module as lambda*/,
                         "Lambda inlining " + info.lambdaClassType.internalName,
                         SourceMapCopier(sourceMapper.parent, info.node.classSMAP, callSite),
-                        inlineCallSiteInfo, globalInlineContext
+                        inlineCallSiteInfo
                     )
 
                     val varRemapper = LocalVarRemapper(lambdaParameters, valueParamShift)
                     //TODO add skipped this and receiver
                     val lambdaResult =
                         inliner.doInline(localVariablesSorter, varRemapper, true, info.returnLabels, invokeCall.finallyDepthShift)
+                    lambdaResult.addInlineScopeInfo(info.node.classSMAP)
+
+                    val seenLineNumbers = mutableSetOf<Int>()
+                    val offset = result.restoredScopes.size
+                    val parentIndex = offset + lambdaResult.restoredScopes.size
+                    for ((scope, mapping) in lambdaResult.restoredScopes.zip(lambdaResult.restoredMappings)) {
+                        seenLineNumbers.addAll(mapping.lineNumbers)
+                        val parent = scope.callerScopeId.takeIf { it >= 0 }?.let { it + offset } ?: parentIndex
+                        if (scope is InlineLambdaScopeInfo) {
+                            val surroundingScopeId = scope.surroundingScopeId.takeIf { it >= 0 }?.let { it + offset } ?: parentIndex
+                            result.restoredScopes.add(
+                                InlineLambdaScopeInfo(
+                                    scope.name,
+                                    parent,
+                                    scope.callSiteLineNumber,
+                                    surroundingScopeId
+                                )
+                            )
+                        } else {
+                            result.restoredScopes.add(InlineScopeInfo(scope.name, parent, scope.callSiteLineNumber))
+                        }
+                        result.restoredMappings.add(
+                            ScopeMapping(
+                                result.restoredScopes.lastIndex,
+                                mapping.lineNumbers
+                            )
+                        )
+                    }
 
                     val lambdaInvokeMethodSignature =
                         info.lambdaClassType.className.substringBefore("$") + "." + info.invokeMethod.toString()
-                    val methodLambdaIsInlinedToSignature =
-                        inliningContext.callSiteInfo.ownerClassName.replace("/", ".") + "." + parentSignature.toString()
-                    val old2NewLineNumbers = hashMapOf<Int, Int>()
-                    for ((i, j) in lambdaResult.lineNumbersBeforeRemapping.zip(lambdaResult.lineNumbersAfterRemapping)) {
-                        old2NewLineNumbers[i] = j
-                    }
-
-                    val functionToScopes = globalInlineContext.inlineFunctionToScopes
-
-                    val parentPackage =
-                        inliningContext.root.sourceCompilerForInline.fqName?.asString()?.substringBeforeLast(".")?.plus(".") ?: ""
-                    val parentName = parentPackage + node.name + node.signature.replace("<.+>".toRegex(), "")
-                    val originScopes = functionToScopes.getOrPut(methodLambdaIsInlinedToSignature) { mutableListOf() }
-                    val lambdaScope = InlineScopeCacheEntry(
-                        lambdaInvokeMethodSignature,
-                        sourceMapper.mapLineNumber(currentLineNumber),
-                        parentName,
-                        lambdaResult.lineNumbersAfterRemapping,
+                    result.restoredScopes.add(
+                        InlineLambdaScopeInfo(
+                            lambdaInvokeMethodSignature,
+                            -1,
+                            sourceMapper.mapLineNumber(currentLineNumber),
+                            -1
+                        )
                     )
-                    originScopes.add(lambdaScope)
-                    val scopes = functionToScopes[lambdaInvokeMethodSignature]
-                    for (scope in scopes.orEmpty()) {
-                        with(scope) {
-                            val newCallSiteLineNumber = old2NewLineNumbers[callSiteLineNumber]
-                                ?: callSiteLineNumber
-                            originScopes.add(
-                                InlineScopeCacheEntry(
-                                    functionId,
-                                    newCallSiteLineNumber,
-                                    parentScopeId ?: lambdaInvokeMethodSignature,
-                                    lineNumbers.mapNotNull { old2NewLineNumbers[it] }
-                                )
-                            )
-                        }
-                    }
+                    result.restoredMappings.add(
+                        ScopeMapping(
+                            parentIndex,
+                            lambdaResult.lineNumbersAfterRemapping.filter { it !in seenLineNumbers }.toMutableList(),
+                        )
+                    )
+
 
                     result.mergeWithNotChangeInfo(lambdaResult)
                     result.reifiedTypeParametersUsages.mergeAll(lambdaResult.reifiedTypeParametersUsages)

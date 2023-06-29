@@ -27,7 +27,8 @@ class InlineResult private constructor() {
     val reifiedTypeParametersUsages = ReifiedTypeParametersUsages()
     val lineNumbersBeforeRemapping = mutableListOf<Int>()
     val lineNumbersAfterRemapping = mutableListOf<Int>()
-    val restoredScopes = mutableListOf<InlineScopeCacheEntry>()
+    val restoredScopes = mutableListOf<InlineScopeInfo>()
+    val restoredMappings = mutableListOf<ScopeMapping>()
 
     fun merge(child: InlineResult) {
         classesToRemove.addAll(child.calcClassesToRemove())
@@ -57,6 +58,37 @@ class InlineResult private constructor() {
 
     fun getChangedTypes(): Map<String, String> {
         return changedTypes
+    }
+
+    fun addInlineScopeInfo(smap: SMAP) {
+        if (lineNumbersAfterRemapping.isEmpty()) {
+            return
+        }
+
+        val old2NewLineNumbers = hashMapOf<Int, Int>()
+        for ((i, j) in lineNumbersBeforeRemapping.zip(lineNumbersAfterRemapping)) {
+            old2NewLineNumbers[i] = j
+        }
+
+        val lineNumbersBeforeRemappingSet = lineNumbersBeforeRemapping.toSet()
+        for (scopeMapping in smap.scopeMappings) {
+            val inlineScope = smap.inlineScopes.getOrNull(scopeMapping.scopeNumber) ?: continue
+            val matchingLineNumbers = scopeMapping.lineNumbers.filter { it in lineNumbersBeforeRemappingSet }
+            if (matchingLineNumbers.isNotEmpty()) {
+                val newCallSiteLineNumber = old2NewLineNumbers[inlineScope.callSiteLineNumber] ?: inlineScope.callSiteLineNumber
+                if (inlineScope is InlineLambdaScopeInfo) {
+                    restoredScopes.add(InlineLambdaScopeInfo(inlineScope.name, inlineScope.callerScopeId, newCallSiteLineNumber, inlineScope.surroundingScopeId))
+                } else {
+                    restoredScopes.add(InlineScopeInfo(inlineScope.name, inlineScope.callerScopeId, newCallSiteLineNumber))
+                }
+                restoredMappings.add(
+                    ScopeMapping(
+                        restoredMappings.size,
+                        matchingLineNumbers.mapNotNull { old2NewLineNumbers[it] }.toMutableList()
+                    )
+                )
+            }
+        }
     }
 
     companion object {

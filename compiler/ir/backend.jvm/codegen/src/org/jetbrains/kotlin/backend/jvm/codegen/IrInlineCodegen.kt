@@ -156,45 +156,40 @@ class IrInlineCodegen(
         val callSiteLineNumber = codegen.lastLineNumber
         val result = performInline(isInsideIfCondition, function.isInlineOnly())
         if (!function.isInlineOnly()) {
-            addInlineScopeInformationToCache(result, callSiteLineNumber)
+            addInlineScopeInformationToSmap(result, callSiteLineNumber)
         }
     }
 
-    private fun addInlineScopeInformationToCache(result: InlineResult, callSiteLineNumber: Int) {
-        val functionToScopes = state.globalInlineContext.inlineFunctionToScopes
-        // TODO: maybe there is a better way to extract a function package name?
-        val originPackageName = codegen.irFunction.fqNameWhenAvailable?.asString()?.substringBeforeLast(".")?.plus(".") ?: ""
-        val inlinedPackageName = function.fqNameWhenAvailable?.asString()?.substringBeforeLast(".")?.plus(".") ?: ""
-        val originSignature = originPackageName + codegen.signature.toString()
-        val originScopes = functionToScopes.getOrPut(originSignature) { mutableListOf() }
-        val inlinedSignature = inlinedPackageName + jvmSignature.toString()
-        val old2NewLineNumbers = hashMapOf<Int, Int>()
-        for ((i, j) in result.lineNumbersBeforeRemapping.zip(result.lineNumbersAfterRemapping)) {
-            old2NewLineNumbers[i] = j
-        }
-
-        val surroundingInlinedScope = InlineScopeCacheEntry(
-            inlinedSignature,
-            callSiteLineNumber,
-            parentScopeId = null,
-            result.lineNumbersAfterRemapping,
-        )
-        originScopes.add(surroundingInlinedScope)
-
-        val scopes = functionToScopes[inlinedSignature].orEmpty() + result.restoredScopes
-        for (scope in scopes) {
-            with(scope) {
-                val newCallSiteLineNumber = old2NewLineNumbers[scope.callSiteLineNumber] ?: scope.callSiteLineNumber
-                originScopes.add(
-                    InlineScopeCacheEntry(
-                        functionId,
-                        newCallSiteLineNumber,
-                        parentScopeId ?: inlinedSignature,
-                        lineNumbers.mapNotNull { old2NewLineNumbers[it] }
-                    )
-                )
+    private fun addInlineScopeInformationToSmap(result: InlineResult, callSiteLineNumber: Int) {
+        val smap = codegen.smap
+        val offset = smap.inlineScopes.size
+        val parentIndex = offset + result.restoredScopes.size
+        val seenLineNumbers = mutableSetOf<Int>()
+        for ((scope, mapping) in result.restoredScopes.zip(result.restoredMappings)) {
+            seenLineNumbers.addAll(mapping.lineNumbers)
+            val parent = scope.callerScopeId.takeIf { it >= 0 }?.let { it + offset } ?: parentIndex
+            if (scope is InlineLambdaScopeInfo) {
+                val surroundingScopeId = if (scope.surroundingScopeId == -1) -1 else scope.surroundingScopeId + offset
+                smap.inlineScopes.add(InlineLambdaScopeInfo(scope.name, parent, scope.callSiteLineNumber, surroundingScopeId))
+            } else {
+                smap.inlineScopes.add(InlineScopeInfo(scope.name, parent, scope.callSiteLineNumber))
             }
+            smap.scopeMappings.add(
+                ScopeMapping(
+                    smap.inlineScopes.lastIndex,
+                    mapping.lineNumbers
+                )
+            )
         }
+
+        val scopeName = jvmSignature.toString().substringBefore('(')
+        smap.inlineScopes.add(InlineScopeInfo(scopeName, -1, callSiteLineNumber))
+        smap.scopeMappings.add(
+            ScopeMapping(
+                parentIndex,
+                result.lineNumbersAfterRemapping.filter { it !in seenLineNumbers }.toMutableList()
+            )
+        )
     }
 
     override fun genCycleStub(text: String, codegen: ExpressionCodegen) {
