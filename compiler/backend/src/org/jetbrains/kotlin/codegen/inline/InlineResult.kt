@@ -27,8 +27,7 @@ class InlineResult private constructor() {
     val reifiedTypeParametersUsages = ReifiedTypeParametersUsages()
     val lineNumbersBeforeRemapping = mutableListOf<Int>()
     val lineNumbersAfterRemapping = mutableListOf<Int>()
-    val restoredScopes = mutableListOf<InlineScopeInfo>()
-    val restoredMappings = mutableListOf<ScopeMapping>()
+    val inlineScopes = mutableListOf<InlineScope>()
 
     fun merge(child: InlineResult) {
         classesToRemove.addAll(child.calcClassesToRemove())
@@ -71,22 +70,24 @@ class InlineResult private constructor() {
         }
 
         val lineNumbersBeforeRemappingSet = lineNumbersBeforeRemapping.toSet()
-        for (scopeMapping in smap.scopeMappings) {
-            val inlineScope = smap.inlineScopes.getOrNull(scopeMapping.scopeNumber) ?: continue
-            val matchingLineNumbers = scopeMapping.lineNumbers.filter { it in lineNumbersBeforeRemappingSet }
+        for (scope in smap.inlineScopes) {
+            val matchingLineNumbers = scope.lineNumbers.filter { it in lineNumbersBeforeRemappingSet }
             if (matchingLineNumbers.isNotEmpty()) {
-                val newCallSiteLineNumber = old2NewLineNumbers[inlineScope.callSiteLineNumber] ?: inlineScope.callSiteLineNumber
-                if (inlineScope is InlineLambdaScopeInfo) {
-                    restoredScopes.add(InlineLambdaScopeInfo(inlineScope.name, inlineScope.callerScopeId, newCallSiteLineNumber, inlineScope.surroundingScopeId))
-                } else {
-                    restoredScopes.add(InlineScopeInfo(inlineScope.name, inlineScope.callerScopeId, newCallSiteLineNumber))
-                }
-                restoredMappings.add(
-                    ScopeMapping(
-                        restoredMappings.size,
-                        matchingLineNumbers.mapNotNull { old2NewLineNumbers[it] }.toMutableList()
+                val newCallSiteLineNumber = old2NewLineNumbers[scope.callSiteLineNumber] ?: scope.callSiteLineNumber
+                val lineNumbers = matchingLineNumbers.mapNotNull { old2NewLineNumbers[it] }.toMutableList()
+                if (scope is InlineLambdaScope) {
+                    inlineScopes.add(
+                        InlineLambdaScope(
+                            scope.name,
+                            scope.callerScopeId,
+                            newCallSiteLineNumber,
+                            scope.surroundingScopeId,
+                            lineNumbers
+                        )
                     )
-                )
+                } else {
+                    inlineScopes.add(InlineScope(scope.name, scope.callerScopeId, newCallSiteLineNumber, lineNumbers))
+                }
             }
         }
     }

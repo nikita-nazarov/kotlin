@@ -315,49 +315,37 @@ class MethodInliner(
                     lambdaResult.addInlineScopeInfo(info.node.classSMAP)
 
                     val seenLineNumbers = mutableSetOf<Int>()
-                    val offset = result.restoredScopes.size
-                    val parentIndex = offset + lambdaResult.restoredScopes.size
-                    for ((scope, mapping) in lambdaResult.restoredScopes.zip(lambdaResult.restoredMappings)) {
-                        seenLineNumbers.addAll(mapping.lineNumbers)
-                        val parent = scope.callerScopeId.takeIf { it >= 0 }?.let { it + offset } ?: parentIndex
-                        if (scope is InlineLambdaScopeInfo) {
-                            val surroundingScopeId = scope.surroundingScopeId.takeIf { it >= 0 }?.let { it + offset } ?: parentIndex
-                            result.restoredScopes.add(
-                                InlineLambdaScopeInfo(
+                    val offset = result.inlineScopes.size
+                    val parentIndex = offset + lambdaResult.inlineScopes.size
+                    for (scope in lambdaResult.inlineScopes) {
+                        seenLineNumbers.addAll(scope.lineNumbers)
+                        val parent = scope.callerScopeId?.let { it + offset } ?: parentIndex
+                        if (scope is InlineLambdaScope) {
+                            val surroundingScopeId = scope.surroundingScopeId?.let { it + offset } ?: parentIndex
+                            result.inlineScopes.add(
+                                InlineLambdaScope(
                                     scope.name,
                                     parent,
                                     scope.callSiteLineNumber,
-                                    surroundingScopeId
+                                    surroundingScopeId,
+                                    scope.lineNumbers
                                 )
                             )
                         } else {
-                            result.restoredScopes.add(InlineScopeInfo(scope.name, parent, scope.callSiteLineNumber))
+                            result.inlineScopes.add(InlineScope(scope.name, parent, scope.callSiteLineNumber, scope.lineNumbers))
                         }
-                        result.restoredMappings.add(
-                            ScopeMapping(
-                                result.restoredScopes.lastIndex,
-                                mapping.lineNumbers
-                            )
-                        )
                     }
 
-                    val lambdaInvokeMethodSignature =
-                        info.lambdaClassType.className.substringBefore("$") + "." + info.invokeMethod.toString()
-                    result.restoredScopes.add(
-                        InlineLambdaScopeInfo(
+                    val lambdaInvokeMethodSignature = info.invokeMethod.toString().substringBefore('(')
+                    result.inlineScopes.add(
+                        InlineLambdaScope(
                             lambdaInvokeMethodSignature,
-                            -1,
+                            callerScopeId = null,
                             sourceMapper.mapLineNumber(currentLineNumber),
-                            -1
-                        )
-                    )
-                    result.restoredMappings.add(
-                        ScopeMapping(
-                            parentIndex,
+                            surroundingScopeId = null,
                             lambdaResult.lineNumbersAfterRemapping.filter { it !in seenLineNumbers }.toMutableList(),
                         )
                     )
-
 
                     result.mergeWithNotChangeInfo(lambdaResult)
                     result.reifiedTypeParametersUsages.mergeAll(lambdaResult.reifiedTypeParametersUsages)

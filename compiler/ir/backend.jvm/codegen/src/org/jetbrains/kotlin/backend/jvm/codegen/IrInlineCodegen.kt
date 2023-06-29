@@ -163,30 +163,33 @@ class IrInlineCodegen(
     private fun addInlineScopeInformationToSmap(result: InlineResult, callSiteLineNumber: Int) {
         val smap = codegen.smap
         val offset = smap.inlineScopes.size
-        val parentIndex = offset + result.restoredScopes.size
+        val parentIndex = offset + result.inlineScopes.size
         val seenLineNumbers = mutableSetOf<Int>()
-        for ((scope, mapping) in result.restoredScopes.zip(result.restoredMappings)) {
-            seenLineNumbers.addAll(mapping.lineNumbers)
-            val parent = scope.callerScopeId.takeIf { it >= 0 }?.let { it + offset } ?: parentIndex
-            if (scope is InlineLambdaScopeInfo) {
-                val surroundingScopeId = if (scope.surroundingScopeId == -1) -1 else scope.surroundingScopeId + offset
-                smap.inlineScopes.add(InlineLambdaScopeInfo(scope.name, parent, scope.callSiteLineNumber, surroundingScopeId))
-            } else {
-                smap.inlineScopes.add(InlineScopeInfo(scope.name, parent, scope.callSiteLineNumber))
-            }
-            smap.scopeMappings.add(
-                ScopeMapping(
-                    smap.inlineScopes.lastIndex,
-                    mapping.lineNumbers
+        for (scope in result.inlineScopes) {
+            seenLineNumbers.addAll(scope.lineNumbers)
+            val parent = scope.callerScopeId?.let { it + offset } ?: parentIndex
+            if (scope is InlineLambdaScope) {
+                val surroundingScopeId = scope.surroundingScopeId?.let { it + offset }
+                smap.inlineScopes.add(
+                    InlineLambdaScope(
+                        scope.name,
+                        parent,
+                        scope.callSiteLineNumber,
+                        surroundingScopeId,
+                        scope.lineNumbers
+                    )
                 )
-            )
+            } else {
+                smap.inlineScopes.add(InlineScope(scope.name, parent, scope.callSiteLineNumber, scope.lineNumbers))
+            }
         }
 
         val scopeName = jvmSignature.toString().substringBefore('(')
-        smap.inlineScopes.add(InlineScopeInfo(scopeName, -1, callSiteLineNumber))
-        smap.scopeMappings.add(
-            ScopeMapping(
-                parentIndex,
+        smap.inlineScopes.add(
+            InlineScope(
+                scopeName,
+                callerScopeId = null,
+                callSiteLineNumber,
                 result.lineNumbersAfterRemapping.filter { it !in seenLineNumbers }.toMutableList()
             )
         )

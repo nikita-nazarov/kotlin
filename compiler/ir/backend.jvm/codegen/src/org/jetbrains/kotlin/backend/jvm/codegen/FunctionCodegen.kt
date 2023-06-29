@@ -124,10 +124,7 @@ class FunctionCodegen(private val irFunction: IrFunction, private val classCodeg
                 context.state.globalInlineContext.exitDeclaration()
             }
             methodVisitor.visitMaxs(-1, -1)
-            val result = SMAP(sourceMapper.resultMappings)
-            result.inlineScopes.addAll(sourceMapper.inlineScopes)
-            result.scopeMappings.addAll(sourceMapper.scopeMappings)
-            result
+            SMAP(sourceMapper.resultMappings).apply { inlineScopes.addAll(sourceMapper.inlineScopes) }
         }
         methodVisitor.visitEnd()
 

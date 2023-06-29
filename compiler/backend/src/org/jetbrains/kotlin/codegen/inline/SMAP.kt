@@ -18,9 +18,8 @@ const val KOTLIN_INLINE_DEBUG_STRATA_NAME = "KotlinInlineDebug"
 object SMAPBuilder {
     fun build(
         fileMappings: List<FileMapping>,
-        inlineScopes: List<InlineScopeInfo>,
-        scopeMappings: List<ScopeMapping>,
-        backwardsCompatibleSyntax: Boolean
+        inlineScopes: List<InlineScope>,
+        backwardsCompatibleSyntax: Boolean,
     ): String? {
         if (fileMappings.isEmpty()) {
             return null
@@ -41,11 +40,7 @@ object SMAPBuilder {
         //      the non-debug stratum) this maps lines 4..6 to lines 1..3. The correct syntax is `1#2:4,3`.
         val defaultStrata = fileMappings.toSMAP(KOTLIN_STRATA_NAME, mapToFirstLine = false)
         val debugStrata = debugMappings.values.toSMAP(KOTLIN_DEBUG_STRATA_NAME, mapToFirstLine = !backwardsCompatibleSyntax)
-        val inlineDebugStrata =
-            "${SMAP.STRATA_SECTION} $KOTLIN_INLINE_DEBUG_STRATA_NAME\n" +
-                    "${SMAP.FILE_SECTION}\n${inlineScopes.toSMAP()}" +
-                    "${SMAP.LINE_SECTION}\n${scopeMappings.map { it.toSMAP() }.joinToString("")}"
-
+        val inlineDebugStrata = "${SMAP.STRATA_SECTION} $KOTLIN_INLINE_DEBUG_STRATA_NAME\n${buildInlineScopesSMAPSections(inlineScopes)}"
         if (backwardsCompatibleSyntax && defaultStrata.isNotEmpty() && debugStrata.isNotEmpty()) {
             return "SMAP\n${fileMappings[0].name}\n$KOTLIN_STRATA_NAME\n$defaultStrata${SMAP.END}\n$debugStrata${SMAP.END}$inlineDebugStrata${SMAP.END}\n"
         }
@@ -57,34 +52,23 @@ object SMAPBuilder {
                 "${SMAP.FILE_SECTION}\n${mapIndexed { id, file -> file.toSMAPFile(id + 1) }.joinToString("")}" +
                 "${SMAP.LINE_SECTION}\n${mapIndexed { id, file -> file.toSMAPMapping(id + 1, mapToFirstLine) }.joinToString("")}"
 
-    private fun List<InlineScopeInfo>.toSMAP(): String =
-        buildString {
-            for ((i, scope) in this@toSMAP.withIndex()) {
-                val scopeInfo = with(scope) {
-                    val callerScopeIdStr = if (callerScopeId < 0) "" else callerScopeId.toString()
-                    if (this is InlineLambdaScopeInfo) {
-                        val surroundingScopeIdStr = if (surroundingScopeId < 0) "" else surroundingScopeId.toString()
-                        "$name/$i/$callerScopeIdStr/$callSiteLineNumber/$surroundingScopeIdStr/"
-                    } else {
-                        "$name/$i/$callerScopeIdStr/$callSiteLineNumber"
-                    }
-                }
-                append("$i $scopeInfo\n")
-            }
-        }
-
-    private fun ScopeMapping.toSMAP(): String =
-        buildString {
-            for (lineNumber in lineNumbers) {
-                append("$lineNumber#$scopeNumber:$lineNumber\n")
-            }
+    private fun buildInlineScopesSMAPSections(inlineScopes: List<InlineScope>): String {
+        val fileSection = StringBuilder()
+        val lineSection = StringBuilder()
+        for ((i, scope) in inlineScopes.withIndex()) {
+            fileSection.append("$i ${scope.toString(i)}\n")
+            for (lineNumber in scope.lineNumbers) {
+                lineSection.append("$lineNumber#$i:$lineNumber\n")
 //            val ranges = lineNumbers.toRanges()
 //            for (range in ranges) {
 //                val size = range.endInclusive - range.start + 1
 //                append("${range.start}#${scopeNumber},$size:0\n")
 //            }
+            }
         }
 
+        return "${SMAP.FILE_SECTION}\n$fileSection" + "${SMAP.LINE_SECTION}\n$lineSection"
+    }
 //    private fun List<Int>.toRanges(): List<ClosedRange<Int>> {
 //        if (isEmpty()) return emptyList()
 //        val numToRange = hashMapOf<Int, IntRange?>()
@@ -130,19 +114,26 @@ class SourceMapCopier(val parent: SourceMapper, private val smap: SMAP, val call
 }
 
 data class SourcePosition(val line: Int, val file: String, val path: String)
-data class ScopeMapping(var scopeNumber: Int, val lineNumbers: MutableList<Int>)
 
-open class InlineScopeInfo(val name: String, var callerScopeId: Int, var callSiteLineNumber: Int) {
-    override fun toString(): String {
-        val callerScopeIdStr = if (callerScopeId < 0) "" else callerScopeId.toString()
-        return "$name/$callerScopeIdStr/$callSiteLineNumber"
+open class InlineScope(val name: String, var callerScopeId: Int?, var callSiteLineNumber: Int, val lineNumbers: MutableList<Int>) {
+    override fun toString(): String = toString(-1)
+
+    open fun toString(id: Int): String {
+        val callerScopeIdStr = callerScopeId?.toString() ?: ""
+        return "$name/$id/$callerScopeIdStr/$callSiteLineNumber"
     }
 }
 
-class InlineLambdaScopeInfo(name: String, callerScopeId: Int, callSiteLineNumber: Int, val surroundingScopeId: Int) : InlineScopeInfo(name, callerScopeId, callSiteLineNumber) {
-    override fun toString(): String {
-        val surroundingScopeIdStr = if (surroundingScopeId < 0) "" else surroundingScopeId.toString()
-        return "${super.toString()}/$surroundingScopeIdStr/"
+class InlineLambdaScope(
+    name: String,
+    callerScopeId: Int?,
+    callSiteLineNumber: Int,
+    var surroundingScopeId: Int?,
+    lineNumbers: MutableList<Int>,
+) : InlineScope(name, callerScopeId, callSiteLineNumber, lineNumbers) {
+    override fun toString(id: Int): String {
+        val surroundingScopeIdStr = surroundingScopeId?.toString() ?: ""
+        return "${super.toString(id)}/$surroundingScopeIdStr/"
     }
 }
 
@@ -150,8 +141,7 @@ class SourceMapper(val sourceInfo: SourceInfo?) {
     private var maxUsedValue: Int = sourceInfo?.linesInFile ?: 0
     private var fileMappings: LinkedHashMap<Pair<String, String>, FileMapping> = linkedMapOf()
 
-    val inlineScopes = mutableListOf<InlineScopeInfo>()
-    val scopeMappings = mutableListOf<ScopeMapping>()
+    val inlineScopes = mutableListOf<InlineScope>()
 
     val resultMappings: List<FileMapping>
         get() = fileMappings.values.toList()
@@ -196,8 +186,7 @@ class SMAP(val fileMappings: List<FileMapping>) {
     // assuming disjoint line mappings (otherwise binary search can't be used anyway)
     private val intervals = fileMappings.flatMap { it.lineMappings }.sortedBy { it.dest }
 
-    val inlineScopes = mutableListOf<InlineScopeInfo>()
-    val scopeMappings = mutableListOf<ScopeMapping>()
+    val inlineScopes = mutableListOf<InlineScope>()
 
     fun findRange(lineNumber: Int): RangeMapping? {
         val index = intervals.binarySearch { if (lineNumber in it) 0 else it.dest - lineNumber }
