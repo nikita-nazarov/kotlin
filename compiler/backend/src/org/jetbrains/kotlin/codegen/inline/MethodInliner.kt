@@ -456,7 +456,7 @@ class MethodInliner(
         )
 
         val transformationVisitor = object : InlineMethodInstructionAdapter(transformedNode) {
-            val seenIndices = mutableSetOf<Int>()
+            var firstLabel: Label? = null
 
             private val GENERATE_DEBUG_INFO = GENERATE_SMAP && !overrideLineNumber
 
@@ -483,9 +483,7 @@ class MethodInliner(
             }
 
             override fun visitVarInsn(opcode: Int, `var`: Int) {
-                val newIndex = getNewIndex(`var`)
-                seenIndices.add(newIndex)
-                super.visitVarInsn(opcode, newIndex)
+                super.visitVarInsn(opcode, getNewIndex(`var`))
             }
 
             override fun visitIincInsn(`var`: Int, increment: Int) {
@@ -523,13 +521,21 @@ class MethodInliner(
                 }
             }
 
+            override fun visitLabel(label: Label) {
+                if (firstLabel == null) {
+                    firstLabel = label
+                }
+                super.visitLabel(label)
+            }
+
             override fun visitLocalVariable(
                 name: String, descriptor: String, signature: String?, start: Label, end: Label, index: Int,
             ) {
                 var newName = name
-                // When inlining function arguments will not be visited by `visitVarInsn` method,
-                // which allows us to add a mock name here to assign the correct scope later
-                if (index !in seenIndices) {
+                // Start labels of method arguments is equal to the first label in this method.
+                // We assign a fake name to every function argument to distinguish them from
+                // ordinary variables when the method is inlined.
+                if (start == firstLabel) {
                     newName = "$name\\giveMeAScope"
                 }
                 super.visitLocalVariable(newName, descriptor, signature, start, end, index)

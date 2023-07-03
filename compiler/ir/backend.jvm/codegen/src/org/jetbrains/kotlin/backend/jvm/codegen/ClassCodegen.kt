@@ -66,7 +66,6 @@ import org.jetbrains.org.objectweb.asm.commons.InstructionAdapter
 import org.jetbrains.org.objectweb.asm.commons.Method
 import org.jetbrains.org.objectweb.asm.tree.MethodNode
 import java.io.File
-import java.util.*
 
 class ClassCodegen private constructor(
     val irClass: IrClass,
@@ -418,59 +417,72 @@ class ClassCodegen private constructor(
             methodNode.signature,
             methodNode.exceptions.toTypedArray()
         )
+
         val scopes = smap.inlineScopes
         val offset = classSMAP.inlineScopes.size
+        val lineNumberToScopeIndex = mutableMapOf<Int, Int>()
+        for ((i, scope) in scopes.withIndex()) {
+            for (lineNumber in scope.lineNumbers) {
+                lineNumberToScopeIndex[lineNumber] = i
+            }
+        }
+
         methodNode.accept(object : MethodVisitor(Opcodes.API_VERSION, InstructionAdapter(node)) {
             var currentLineNumber = 0
-            var currentScopeNumber = -1
-            val indexToLineNumbers = hashMapOf<Int, Queue<Int>>()
-            val indexToScopeNumbers = hashMapOf<Int, Queue<Int>>()
-            val lineNumberToNextScope = hashMapOf<Int, Int>()
-            val lineNumbersWaitingForScope = mutableListOf<Int>()
+            val labelToLineNumber = mutableMapOf<Label, Int>()
+            val labels = mutableListOf<Label>()
+
+            override fun visitLabel(label: Label) {
+                labelToLineNumber[label] = currentLineNumber
+                labels.add(label)
+                super.visitLabel(label)
+            }
 
             override fun visitLineNumber(line: Int, start: Label?) {
                 currentLineNumber = line
-                currentScopeNumber = scopes.indexOfFirst { scope -> scope.lineNumbers.any { it == line } }
-                if (currentScopeNumber != -1) {
-                    for (lineNumber in lineNumbersWaitingForScope) {
-                        lineNumberToNextScope[lineNumber] = currentScopeNumber
-                    }
-                    lineNumbersWaitingForScope.clear()
-                }
-                lineNumbersWaitingForScope.add(line)
                 super.visitLineNumber(line, start)
-            }
-
-            override fun visitVarInsn(opcode: Int, `var`: Int) {
-                indexToLineNumbers.computeIfAbsent(`var`) { LinkedList() }.add(currentLineNumber)
-                indexToScopeNumbers.computeIfAbsent(`var`) { LinkedList() }.add(currentScopeNumber)
-                super.visitVarInsn(opcode, `var`)
             }
 
             override fun visitLocalVariable(
                 name: String, descriptor: String, signature: String?, start: Label, end: Label, index: Int,
             ) {
-                var newName = name
-                val lineNumber = indexToLineNumbers[index]?.poll()
-                val scopeNumber = indexToScopeNumbers[index]?.poll() ?: -1
-                if (name.contains("\\giveMeAScope") && lineNumber != null) {
-                    val nextScopeNumber = lineNumberToNextScope[lineNumber]
-                    if (nextScopeNumber != null) {
-                        newName = name.substringBefore("\\") + "\\${nextScopeNumber}"
+                super.visitLocalVariable(assignScopeNumber(name, start), descriptor, signature, start, end, index)
+            }
+
+            private fun assignScopeNumber(name: String, start: Label): String {
+                val lineNumber = labelToLineNumber[start] ?: return name
+                val scopeNumber = lineNumberToScopeIndex[lineNumber]
+                if (name.contains("\\giveMeAScope")) {
+                    val nextScope = findNextScope(scopeNumber, start)
+                    if (nextScope != null) {
+                        return name.substringBefore("\\") + "\\${nextScope}"
                     }
-                } else {
-                    if (scopeNumber != -1 &&
-                        !name.startsWith(JvmAbi.LOCAL_VARIABLE_NAME_PREFIX_INLINE_FUNCTION) &&
-                        !name.startsWith(JvmAbi.LOCAL_VARIABLE_NAME_PREFIX_INLINE_ARGUMENT)
-                    ) {
-                        newName = name.substringBefore("\\") + "\\${scopeNumber + offset}"
+                } else if (scopeNumber != null &&
+                    !name.startsWith(JvmAbi.LOCAL_VARIABLE_NAME_PREFIX_INLINE_FUNCTION) &&
+                    !name.startsWith(JvmAbi.LOCAL_VARIABLE_NAME_PREFIX_INLINE_ARGUMENT)
+                ) {
+                    return name.substringBefore("\\") + "\\${scopeNumber + offset}"
+                }
+
+                return name
+            }
+
+            private fun findNextScope(currentScope: Int?, label: Label): Int? {
+                val index = labels.indexOf(label).takeIf { it >= 0 } ?: return null
+                for (i in index until labels.size) {
+                    val line = labelToLineNumber[labels[i]] ?: continue
+                    val scope = lineNumberToScopeIndex[line]
+                    if (scope != currentScope) {
+                        return scope
                     }
                 }
-                super.visitLocalVariable(newName, descriptor, signature, start, end, index)
+
+                return null
             }
         })
 
-        node.preprocessSuspendMarkers(method.origin == JvmLoweredDeclarationOrigin.FOR_INLINE_STATE_MACHINE_TEMPLATE || method.isEffectivelyInlineOnly(),
+        node.preprocessSuspendMarkers(
+            method.origin == JvmLoweredDeclarationOrigin.FOR_INLINE_STATE_MACHINE_TEMPLATE || method.isEffectivelyInlineOnly(),
             method.origin == JvmLoweredDeclarationOrigin.FOR_INLINE_STATE_MACHINE_TEMPLATE_CAPTURES_CROSSINLINE
         )
         val mv = with(node) { visitor.newMethod(method.descriptorOrigin, access, name, desc, signature, exceptions.toTypedArray()) }
