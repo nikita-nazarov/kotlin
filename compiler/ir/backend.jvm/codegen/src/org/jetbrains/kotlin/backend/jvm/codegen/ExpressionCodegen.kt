@@ -142,6 +142,8 @@ class ExpressionCodegen(
 ) : IrElementVisitor<PromisedValue, BlockInfo>, BaseExpressionCodegen {
     override fun toString(): String = signature.toString()
 
+    override var inlinedScopes = 0
+
     var finallyDepth = 0
 
     val enclosingFunctionForLocalObjects: IrFunction

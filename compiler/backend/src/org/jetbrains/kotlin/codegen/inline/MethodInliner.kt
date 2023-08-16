@@ -50,7 +50,7 @@ class MethodInliner(
     private val isInlineOnlyMethod: Boolean = false,
     private val shouldPreprocessApiVersionCalls: Boolean = false,
     private val defaultMaskStart: Int = -1,
-    private val defaultMaskEnd: Int = -1
+    private val defaultMaskEnd: Int = -1,
 ) {
     private val languageVersionSettings = inliningContext.state.languageVersionSettings
     private val invokeCalls = ArrayList<InvokeCall>()
@@ -67,7 +67,7 @@ class MethodInliner(
         adapter: MethodVisitor,
         remapper: LocalVarRemapper,
         remapReturn: Boolean,
-        returnLabels: Map<String, Label?>
+        returnLabels: Map<String, Label?>,
     ): InlineResult {
         return doInline(adapter, remapper, remapReturn, returnLabels, 0)
     }
@@ -87,7 +87,7 @@ class MethodInliner(
         remapper: LocalVarRemapper,
         remapReturn: Boolean,
         returnLabels: Map<String, Label?>,
-        finallyDeepShift: Int
+        finallyDeepShift: Int,
     ): InlineResult {
         //analyze body
         var transformedNode = markPlacesForInlineAndRemoveInlinable(node, returnLabels, finallyDeepShift)
@@ -306,6 +306,7 @@ class MethodInliner(
                     //TODO add skipped this and receiver
                     val lambdaResult =
                         inliner.doInline(localVariablesSorter, varRemapper, true, info.returnLabels, invokeCall.finallyDepthShift)
+                    inliningContext.inlinedScopes += inliner.inliningContext.inlinedScopes
                     result.mergeWithNotChangeInfo(lambdaResult)
                     result.reifiedTypeParametersUsages.mergeAll(lambdaResult.reifiedTypeParametersUsages)
                     result.reifiedTypeParametersUsages.mergeAll(info.reifiedTypeParametersUsages)
@@ -414,6 +415,12 @@ class MethodInliner(
             node.signature, node.exceptions?.toTypedArray()
         )
 
+        if (node.localVariables.isNotEmpty()) {
+            val alreadyInlinedScopesNum = inliningContext.inlinedScopes + (inliningContext.parent?.inlinedScopes ?: 0)
+            val addedScopes = renameVariablesUsingMarkerVariables(node, alreadyInlinedScopesNum)
+            inliningContext.inlinedScopes += addedScopes
+        }
+
         val transformationVisitor = object : InlineMethodInstructionAdapter(transformedNode) {
             private val GENERATE_DEBUG_INFO = GENERATE_SMAP && !isInlineOnlyMethod
 
@@ -482,8 +489,13 @@ class MethodInliner(
                 if (!isInliningLambda && !GENERATE_DEBUG_INFO) return
                 val isInlineFunctionMarker = name.startsWith(JvmAbi.LOCAL_VARIABLE_NAME_PREFIX_INLINE_FUNCTION)
                 val newName = when {
-                    inliningContext.isRoot && !isInlineFunctionMarker && name == AsmUtil.THIS -> {
-                        AsmUtil.INLINE_DECLARATION_SITE_THIS
+                    inliningContext.isRoot && !isInlineFunctionMarker && name.startsWith(AsmUtil.THIS) -> {
+                        val scopeNumber = name.scopeNumber
+                        if (scopeNumber != null) {
+                            "${AsmUtil.INLINE_DECLARATION_SITE_THIS}$INLINE_SCOPE_NUMBER_SEPARATOR$scopeNumber"
+                        } else {
+                            AsmUtil.INLINE_DECLARATION_SITE_THIS
+                        }
                     }
                     else -> name
                 }
@@ -500,7 +512,7 @@ class MethodInliner(
     }
 
     private fun markPlacesForInlineAndRemoveInlinable(
-        node: MethodNode, returnLabels: Map<String, Label?>, finallyDeepShift: Int
+        node: MethodNode, returnLabels: Map<String, Label?>, finallyDeepShift: Int,
     ): MethodNode {
         val processingNode = prepareNode(node, finallyDeepShift)
 
@@ -784,7 +796,7 @@ class MethodInliner(
 
     private fun replaceContinuationsWithFakeOnes(
         continuations: Collection<AbstractInsnNode>,
-        node: MethodNode
+        node: MethodNode,
     ) {
         for (toReplace in continuations) {
             insertNodeBefore(createFakeContinuationMethodNodeForInline(), node, toReplace)
@@ -907,7 +919,7 @@ class MethodInliner(
         desc: String,
         lambdaMapping: Map<Int, FunctionalArgument>,
         needReification: Boolean,
-        capturesAnonymousObjectThatMustBeRegenerated: Boolean
+        capturesAnonymousObjectThatMustBeRegenerated: Boolean,
     ): AnonymousObjectTransformationInfo {
         // In objects inside non-default inline lambdas, all reified type parameters are free (not from the function
         // we're inlining into) so there's nothing to reify:
@@ -1022,7 +1034,7 @@ class MethodInliner(
         private class LocalReturn(
             private val returnInsn: AbstractInsnNode,
             private val insertBeforeInsn: AbstractInsnNode,
-            private val frame: Frame<FixStackValue>
+            private val frame: Frame<FixStackValue>,
         ) {
 
             fun transform(insnList: InsnList, returnVariableIndex: Int) {
@@ -1058,7 +1070,7 @@ class MethodInliner(
         fun addLocalReturnToTransform(
             returnInsn: AbstractInsnNode,
             insertBeforeInsn: AbstractInsnNode,
-            sourceValueFrame: Frame<FixStackValue>
+            sourceValueFrame: Frame<FixStackValue>,
         ) {
             assert(isReturnOpcode(returnInsn.opcode)) { "return instruction expected" }
             assert(returnOpcode < 0 || returnOpcode == returnInsn.opcode) { "Return op should be " + Printer.OPCODES[returnOpcode] + ", got " + Printer.OPCODES[returnInsn.opcode] }
@@ -1089,7 +1101,7 @@ class MethodInliner(
         @JvmField val beforeIns: AbstractInsnNode,
         @JvmField val returnType: Type,
         @JvmField val finallyIntervalEnd: LabelNode,
-        @JvmField val jumpTarget: Label?
+        @JvmField val jumpTarget: Label?,
     )
 
     companion object {
@@ -1163,7 +1175,7 @@ class MethodInliner(
         //process local and global returns (local substituted with goto end-label global kept unchanged)
         @JvmStatic
         fun processReturns(
-            node: MethodNode, returnLabels: Map<String, Label?>, endLabel: Label?
+            node: MethodNode, returnLabels: Map<String, Label?>, endLabel: Label?,
         ): List<PointForExternalFinallyBlocks> {
             val result = ArrayList<PointForExternalFinallyBlocks>()
             val instructions = node.instructions
@@ -1203,4 +1215,142 @@ class MethodInliner(
             return result
         }
     }
+}
+
+private fun renameVariablesUsingMarkerVariables(node: MethodNode, scopeOffset: Int): Int {
+    val labelToIndex = node.getLabelToIndexMap()
+
+    fun LocalVariableNode.contains(other: LocalVariableNode): Boolean {
+        val startIndex = labelToIndex[start.label] ?: return false
+        val endIndex = labelToIndex[end.label] ?: return false
+        val otherStartIndex = labelToIndex[other.start.label] ?: return false
+        val otherEndIndex = labelToIndex[other.end.label] ?: return false
+        return startIndex <= otherStartIndex && endIndex >= otherEndIndex
+    }
+
+    // Inline function and lambda parameters are introduced before the corresponding inline marker variable,
+    // so we need to keep track of them to assign the correct scope number later.
+    val variablesWithNotMatchingDepth = mutableListOf<LocalVariableNode>()
+
+    val inlineScopes = Stack<Pair<LocalVariableNode, Int>>()
+
+    // The scope number 0 belongs to the top frame
+    var currentInlineScopeIndex = 0
+    var seenInlineScopesNum = 0
+
+    fun calculateNewName(variable: LocalVariableNode): String =
+        variable.name
+            .replace(INLINE_FUN_VAR_SUFFIX, "")
+            .substringBefore(INLINE_SCOPE_NUMBER_SEPARATOR)
+            .addScopeNumber(currentInlineScopeIndex + scopeOffset)
+
+    var previousScopeNumber: Int? = null
+
+    val sortedVariables = node.localVariables.sortedBy { labelToIndex[it.start.label] }
+    for (variable in sortedVariables) {
+        while (inlineScopes.isNotEmpty() && !inlineScopes.peek().first.contains(variable)) {
+            inlineScopes.pop()
+        }
+
+        if (inlineScopes.isNotEmpty()) {
+            currentInlineScopeIndex = inlineScopes.peek().second
+        }
+
+        val name = variable.name
+        val scopeNumber = name.scopeNumber
+        when {
+            isFakeLocalVariableForInline(name) -> {
+                previousScopeNumber = scopeNumber
+                seenInlineScopesNum += 1
+                currentInlineScopeIndex = seenInlineScopesNum
+
+                val newName = calculateNewName(variable)
+                if (name.startsWith(JvmAbi.LOCAL_VARIABLE_NAME_PREFIX_INLINE_ARGUMENT)) {
+                    val surroundingScopeNumber = name.surroundingScopeNumber
+                    variable.name = when {
+                        // The first encountered inline scopes belongs to the lambda, which means
+                        // that its surrounding scope is the function where the lambda is being inlined to.
+                        currentInlineScopeIndex == 1 ->
+                            newName.addScopeNumber(0)
+                        // Every lambda that is already inlined must have a surrounding scope number.
+                        // If it doesn't, then it means that we are inlining the code compiled by
+                        // older versions of the Kotlin compiler, where surrounding scope numbers
+                        // haven't been introduced yet.
+                        surroundingScopeNumber != null ->
+                            newName.addScopeNumber(surroundingScopeNumber + scopeOffset + 1)
+                        // If a lambda doesn't have a surrounding scope number, we will calculate its
+                        // depth using the number of $iv suffixes
+                        else -> {
+                            val depth = getInlineDepth(name)
+                            val newSurroundingScopeNumber = inlineScopes.getOrNull(depth)?.second?.plus(scopeOffset) ?: continue
+                            newName.addScopeNumber(newSurroundingScopeNumber)
+                        }
+                    }
+                } else {
+                    variable.name = newName
+                }
+
+                inlineScopes.push(Pair(variable, currentInlineScopeIndex))
+                variablesWithNotMatchingDepth.forEach { it.name = calculateNewName(it) }
+                variablesWithNotMatchingDepth.clear()
+            }
+            scopeNumber != null -> {
+                if (scopeNumber != previousScopeNumber) {
+                    variablesWithNotMatchingDepth.add(variable)
+                } else {
+                    variable.name = calculateNewName(variable)
+                }
+            }
+            else -> {
+                // Since the node is an inline function, the depth of all variables inside is at least one
+                val depth = getInlineDepth(name) + 1
+                if (depth != inlineScopes.size) {
+                    variablesWithNotMatchingDepth.add(variable)
+                } else {
+                    variable.name = calculateNewName(variable)
+                }
+            }
+        }
+    }
+
+    return seenInlineScopesNum
+}
+
+private fun MethodNode.getLabelToIndexMap(): Map<Label, Int> =
+    instructions.filterIsInstance<LabelNode>()
+        .withIndex()
+        .associate { (index, labelNode) ->
+            labelNode.label to index
+        }
+
+private val String.scopeNumber: Int?
+    get() =
+        substringAfter(INLINE_SCOPE_NUMBER_SEPARATOR)
+            .substringBefore(INLINE_SCOPE_NUMBER_SEPARATOR)
+            .toIntOrNull()
+
+private val String.surroundingScopeNumber: Int?
+    get() =
+        substringAfter(INLINE_SCOPE_NUMBER_SEPARATOR, "")
+            .substringAfter(INLINE_SCOPE_NUMBER_SEPARATOR, "")
+            .toIntOrNull()
+
+private fun String.addScopeNumber(num: Int): String =
+    "$this$INLINE_SCOPE_NUMBER_SEPARATOR$num"
+
+private fun getInlineDepth(variableName: String): Int {
+    var endIndex = variableName.length
+    var depth = 0
+
+    val suffixLen = INLINE_FUN_VAR_SUFFIX.length
+    while (endIndex >= suffixLen) {
+        if (variableName.substring(endIndex - suffixLen, endIndex) != INLINE_FUN_VAR_SUFFIX) {
+            break
+        }
+
+        depth++
+        endIndex -= suffixLen
+    }
+
+    return depth
 }
